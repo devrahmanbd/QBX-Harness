@@ -29,8 +29,11 @@ min=${M2_MIN_PACKETS:-50}
 [ "${in_n:-0}" -le "$min" ] || [ "${out_n:-0}" -le "$min" ] && \
   emit M2 1 "counters below floor: in=$in_n out=$out_n min=$min app=$app"
 wait "$caller"; caller_rc=$?
+grep -q 'invite=.*200' "$RUN_DIR/m2-caller.out" && grep -q 'bye=.*200' "$RUN_DIR/m2-caller.out" \
+  || emit M2 1 "caller did not complete cleanly: $(tr '\n' ' ' <"$RUN_DIR/m2-caller.out")"
 [ "$caller_rc" -ne 0 ] && emit M2 1 "caller rc=$caller_rc: $(tr '\n' ' ' <"$RUN_DIR/m2-caller.out")"
 sleep 2
 left=$(esl "show channels like $uuid" 2>/dev/null | grep -cE '^[0-9a-f]{8}-[0-9a-f-]{27}')
 [ "${left:-0}" -gt 0 ] && emit M2 1 "channel not hung up after BYE: $uuid"
-emit M2 0 "app=$app in=$in_n out=$out_n min=$min; invite+bye 200; channel gone"
+inv=$(grep -m1 '^invite=' "$RUN_DIR/m2-caller.out"); byel=$(grep -m1 '^bye=' "$RUN_DIR/m2-caller.out")
+emit M2 0 "app=$app in=$in_n out=$out_n min=$min; $inv $byel; channel gone"

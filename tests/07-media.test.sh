@@ -18,7 +18,7 @@ jq -e '.result=="pass"' "$RUN_DIR/m1-lifecycle.json" >/dev/null || { echo "artif
 bash "$H/checks/M2-echo-media.sh" >"$TD/m2.json" 2>&1 || { echo "M2 live should pass: $(cat "$TD/m2.json")"; exit 1; }
 ev=$(jq -r .evidence "$TD/m2.json")
 printf '%s' "$ev" | grep -qE 'in=[0-9]+ out=[0-9]+' || { echo "M2 evidence lacks counters"; exit 1; }
-in_n=$(printf '%s' "$ev" | grep -oE '(^| )in=[0-9]+' | grep -oE '[0-9]+'); out_n=$(printf '%s' "$ev" | grep -oE 'out=[0-9]+' | cut -d= -f2)
+in_n=$(printf '%s' "$ev" | grep -oE '(^| )in=[0-9]+' | grep -oE '[0-9]+'); out_n=$(printf '%s' "$ev" | grep -oE '(^| )out=[0-9]+' | grep -oE '[0-9]+')
 [ "${in_n:-0}" -gt 50 ] && [ "${out_n:-0}" -gt 50 ] || { echo "counters below floor: in=$in_n out=$out_n"; exit 1; }
 grep -q 'invite=.*200' "$RUN_DIR/m2-caller.out" && grep -q 'bye=.*200' "$RUN_DIR/m2-caller.out" \
   || { echo "caller did not complete cleanly"; exit 1; }

@@ -116,7 +116,7 @@ def main():
         branch = "z9hG4bK-h-%s" % rand_tag()
         via_h = "Via: SIP/2.0/UDP %s:%d;rport;branch=%s" % (s.local_ip, s.local_port, branch)
         invite2 = ("INVITE %s SIP/2.0\r\n%s\r\n%s\r\n%s\r\nCall-ID: %s\r\nCSeq: %d INVITE\r\n"
-                   "%s\r\n%s\r\nMax-Forwards: 70\r\nContent-Type: application/sdp\r\n"
+                   "%s\r\nContact: %s\r\nMax-Forwards: 70\r\nContent-Type: application/sdp\r\n"
                    "Content-Length: %d\r\n\r\n%s"
                    % (uri, via_h, from_h, to_h, callid, cseq, auth, contact, len(sdp), sdp))
         s.send(invite2)
@@ -161,10 +161,11 @@ def main():
            % (uri, via_h, from_h, to_h, callid, cseq))
     s.send(bye)
     resp2, _ = s.recv_until(r"^SIP/2.0 \d\d\d", 5.0)
-    print("bye=%s" % (resp2.split("\r\n")[0] if resp2 else "NO-RESPONSE"))
+    bye_line = resp2.split("\r\n")[0] if resp2 else "NO-RESPONSE"
+    print("bye=%s" % bye_line)
     rtp.close()
     s.sock.close()
-    return 0
+    return 0 if bye_line.startswith("SIP/2.0 200") else 1
 
 
 if __name__ == "__main__":
