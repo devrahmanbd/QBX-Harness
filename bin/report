@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# bin/report <run-dir> — render results.jsonl + fixes.log + flags into report.md. No free-text claims.
+set -uo pipefail
+H="${HARNESS_ROOT:-/root/qbx-harness}"
+. "$H/lib/common.sh"
+run="${1:?usage: report <run-dir>}"; res="$run/results.jsonl"
+[ -f "$res" ] || { echo "report: no results.jsonl in $run" >&2; exit 1; }
+flags="$H/state/loop.flags"; fixes="$H/fixes.log"
+{
+  echo "# Harness run $(basename "$run")"
+  echo
+  echo "- memory gate / flags: $(tr '\n' ' ' <"$flags" 2>/dev/null | redact)"
+  echo "- lines: $(wc -l < "$res")"
+  echo
+  echo "| check | exit | class | evidence |"
+  echo "|---|---|---|---|"
+  jq -r '[.check, (.exit|tostring),
+    (if .exit==0 then "pass" elif .exit==1 then "open-finding" elif .exit==2 then "blocked" else "error" end),
+    (.evidence | gsub("\\|"; "/") | .[0:300])] | @tsv' "$res" 2>/dev/null \
+    | awk -F'\t' '{print "| "$1" | "$2" | "$3" | "$4" |"}'
+  echo
+  echo "## Findings"
+  echo
+  jq -r 'select(.exit!=0 and .check!="MEM-GATE") | "- **\(.check)** exit=\(.exit): \(.evidence)"' "$res" 2>/dev/null
+  echo
+  echo "## Fixes"
+  echo
+  [ -f "$fixes" ] && cat "$fixes" | redact || echo "- (none recorded)"
+  echo
+  echo "## Notes"
+  echo
+  echo "- every evidence string above is copied from results.jsonl for this run_id; no other claims are made."
+} | redact > "$run/report.md"
+echo "$run/report.md"

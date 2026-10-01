@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# bin/loop — sequential supervisor. exit 0 complete / 1 breaker / 130 aborted.
+set -uo pipefail
+H="${HARNESS_ROOT:-/root/qbx-harness}"
+. "$H/lib/common.sh"
+CHECKS_DIR="$H/checks"; RUNS_DIR="$H/runs"; CATALOG_FILE="$H/checks/CATALOG"
+DRY=0; SKIP_GATE=0; NOMEM=0; ONLY=""
+while [ $# -gt 0 ]; do case "$1" in
+  --runs-dir) RUNS_DIR="$2"; shift 2;;
+  --checks-dir) CHECKS_DIR="$2"; shift 2;;
+  --catalog) CATALOG_FILE="$2"; shift 2;;
+  --dry-run) DRY=1; SKIP_GATE=1; NOMEM=1; shift;;
+  --skip-gate) SKIP_GATE=1; shift;;
+  --no-memory) NOMEM=1; SKIP_GATE=1; shift;;
+  --only) ONLY="$2"; shift 2;;
+  *) echo "unknown arg $1" >&2; exit 64;;
+esac; done
+
+FLAGS="$H/state/loop.flags"; : > "$FLAGS"
+[ "$DRY" -eq 0 ] || echo "dry_run=1" >> "$FLAGS"
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"; RUN_DIR="$RUNS_DIR/$RUN_ID"; mkdir -p "$RUN_DIR" "$H/state"
+RESULTS="$RUN_DIR/results.jsonl"; : > "$RESULTS"
+MEMDEG=0; CONSEC=0; STOP=""
+
+on_sigint() { [ "$DRY" -eq 1 ] && exit 130
+  echo "aborted=1" >> "$FLAGS"; "$H/bin/report" "$RUN_DIR" >/dev/null 2>&1 || true; exit 130; }
+trap on_sigint INT TERM
+
+if [ "$SKIP_GATE" -eq 0 ]; then
+  gline=$("$H/bin/memory-gate" 2>/dev/null); g=$?
+  printf '%s\n' "$gline" >> "$RESULTS"
+  if [ "$g" -ne 0 ]; then MEMDEG=1; echo "memory_degraded=1" >> "$FLAGS"
+    echo "loop: memory gate FAILED — continuing loudly" >&2; fi
+fi
+
+ids=$(cat "$CATALOG_FILE")
+[ -n "$ONLY" ] && ids="$ONLY"
+for id in $ids; do
+  file="$CHECKS_DIR/$id"*.sh; file=$(ls $file 2>/dev/null | head -1)
+  if [ -z "$file" ] || [ ! -f "$file" ]; then
+    line=$(jq -cn --arg c "$id" --argjson e 3 --arg ev "check file not found for $id" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{check:$c,exit:$e,evidence:$ev,ts:$ts}')
+  else
+    mq=$(grep -E '^# memory-query:' "$file" | head -1 | sed 's/^# memory-query:[[:space:]]*//')
+    to=$(grep -E '^# timeout:' "$file" | head -1 | sed 's/^# timeout:[[:space:]]*//'); to="${to:-45}"
+    if [ "$DRY" -eq 0 ] && [ "$NOMEM" -eq 0 ] && [ -n "$mq" ]; then
+      "$H/bin/mem0" search "$mq" >/dev/null 2>&1 || { MEMDEG=1; echo "memory_degraded=1" >> "$FLAGS"; }
+    fi
+    out=$(RUN_DIR="$RUN_DIR" timeout "$to" bash "$file" 2>"$H/state/.err.$$"); rc=$?
+    errtail=$(tail -c 300 "$H/state/.err.$$" 2>/dev/null | tr '\n' ' '); rm -f "$H/state/.err.$$"
+    line=$(printf '%s' "$out" | grep -m1 '^{.*}$')
+    if [ -z "$line" ]; then
+      line=$(jq -cn --arg c "$id" --argjson e 3 \
+        --arg ev "check produced no valid JSON line (rc=$rc): $errtail" \
+        --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{check:$c,exit:$e,evidence:$ev,ts:$ts}')
+      rc=3
+    fi
+    real=$(printf '%s' "$line" | jq -r '.exit // 3' 2>/dev/null); real="${real:-3}"
+    case "$real" in 0|1|2|3) :;; *) line=$(printf '%s' "$line" | jq -c --argjson e 3 --arg ev "normalized_from=$real" '.exit=$e, .evidence=(.evidence+" "+$ev)'); real=3;; esac
+    [ "$rc" -eq 124 ] && { line=$(printf '%s' "$line" | jq -c '.exit=3 | .evidence=(.evidence+" timeout")'); real=3; }
+    # consecutive counter: error(3) increments and trips at exactly 3; exit 0/1/2 reset to 0
+    if [ "$real" -eq 3 ]; then CONSEC=$((CONSEC+1)); else CONSEC=0; fi
+    if [ "$CONSEC" -ge 3 ]; then STOP="breaker: 3 consecutive error(3)"; fi
+  fi
+  printf '%s' "$line" | jq -c --arg run "$RUN_ID" '. + {run_id:$run}' | redact >> "$RESULTS"
+  if [ "$DRY" -eq 0 ] && [ "$NOMEM" -eq 0 ]; then
+    ev=$(printf '%s' "$line" | jq -r '.evidence // ""' | cut -c1-300)
+    "$H/bin/mem0" add "$(printf '%s' "$RUN_ID: $(printf '%s' "$line" | jq -r '.check') exit $(printf '%s' "$line" | jq -r '.exit') — " "$ev")" >/dev/null 2>&1 \
+      || { MEMDEG=1; echo "memory_degraded=1" >> "$FLAGS"; }
+  fi
+  [ -n "$STOP" ] && break
+done
+[ -n "$STOP" ] && echo "$STOP" >> "$FLAGS"
+"$H/bin/report" "$RUN_DIR" >/dev/null 2>&1
+[ -n "$STOP" ] && exit 1 || exit 0
