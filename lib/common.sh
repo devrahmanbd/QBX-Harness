@@ -3,9 +3,19 @@
 set -uo pipefail
 HARNESS_ROOT="${HARNESS_ROOT:-/root/qbx-harness}"
 HOST_NS=(nsenter -t 1 -n)
-[ -f "$HARNESS_ROOT/.env" ] && { set -a; . "$HARNESS_ROOT/.env"; set +a; }
+[ -f "$HARNESS_ROOT/.env" ] && while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in ''|'#'*) continue;; esac
+  line="${line#export }"
+  case "$line" in *=*) :;; *) continue;; esac
+  k="${line%%=*}"
+  case "$k" in ''|[0-9]*|*[!A-Za-z0-9_]*) continue;; esac
+  [ -n "${!k+x}" ] && continue
+  export "$line"
+done < "$HARNESS_ROOT/.env"
 redact() { sed -E \
   -e 's/((PASSWORD|TOKEN|SECRET|API_KEY|EXT_SECRET|JWT)[_A-Z]*)=[^[:space:]]+/\1=<redacted>/Ig' \
+  -e 's/"([_A-Z0-9]*(PASSWORD|TOKEN|SECRET|API_KEY|EXT_SECRET|JWT)[_A-Z]*)"([[:space:]]*:[[:space:]]*)"[^"]*"/"\1": "<redacted>"/Ig' \
+  -e 's/((PASSWORD|TOKEN|SECRET|API_KEY|EXT_SECRET|JWT)[_A-Z]*)[[:space:]]*:[[:space:]]*[^[:space:]]+/\1: <redacted>/Ig' \
   -e 's/(Authorization:[[:space:]]*(Bearer|Token)[[:space:]]+)[^[:space:]]+/\1<redacted>/Ig'; }
 emit() {  # emit <check-id> <exit> <evidence...>  — the ONLY stdout of a check
   local id="$1" code="$2"; shift 2
