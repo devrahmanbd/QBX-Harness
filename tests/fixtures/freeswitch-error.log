@@ -1,0 +1,13 @@
+2026-10-01 09:00:00.100001 [INFO] switch_core.c:1615 Setup Lock Init
+2026-10-01 09:00:00.100102 [INFO] switch_loadable_module.c:120 Module "mod_sofia" loaded
+2026-10-01 09:00:00.100203 [INFO] switch_loadable_module.c:120 Module "mod_event_socket" loaded
+2026-10-01 09:00:00.100304 [INFO] switch_loadable_module.c:120 Module "mod_xml_curl" loaded
+2026-10-01 09:00:00.100405 [INFO] sofia.c:1201 sofia profile "external" started
+2026-10-01 09:00:00.100506 [INFO] switch_core.c:2000 Runtime initialized
+2026-10-01 09:00:01.100607 [INFO] switch_ivr_async.c:501 Channel entered queue "cool_fifo"
+2026-10-01 09:00:02.100708 [INFO] switch_core.c:1411 Hash table sized to 4096
+2026-10-01 09:00:03.100809 [INFO] mod_xml_curl.c:331 XML config requested
+2026-10-01 09:00:04.100910 [INFO] switch_scheduler.c:73 Scheduler started
+2026-10-01 09:05:00.200001 [ERROR] switch_core.c:1700 media bug failed: no such session
+2026-10-01 09:06:00.200002 [ERROR] mod_sofia.c:2501 INVITE rejected with 403 Forbidden
+2026-10-01 09:07:00.200003 [CRIT] switch_crash.c:112 CRASH dump requested by watchdog
