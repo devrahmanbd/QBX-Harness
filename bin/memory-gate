@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# bin/memory-gate — 3 probe queries, retries for eventual consistency. exit 0/1, one JSON line.
+set -uo pipefail
+H=/root/qbx-harness; M="$H/bin/mem0"
+Q1="${GATE_Q1:-which SIP port does the external profile listen on}"
+Q2="${GATE_Q2:-how does the XML-curl resolver fail closed for unknown DIDs}"
+Q3="${GATE_Q3:-where is FreeSWITCH configuration stored in this deployment}"
+probe() {  # probe <query> <regex> -> echoes hits_count
+  local q="$1" re="$2" hits=0 body=""
+  for attempt in 1 2 3; do
+    body=$("$M" search "$q" 2>/dev/null) || body=""
+    hits=$(printf '%s' "$body" | jq -r '.[].memory // empty' 2>/dev/null | grep -cEi "$re" || true)
+    [ "${hits:-0}" -ge 1 ] && break
+    sleep 5
+  done
+  printf '%s' "$hits"
+}
+h1=$(probe "$Q1" '5060'); h2=$(probe "$Q2" '404|Unallocated'); h3=$(probe "$Q3" 'container|entrypoint|/etc/freeswitch')
+exit_code=$([ "$h1" -ge 1 ] && [ "$h2" -ge 1 ] && [ "$h3" -ge 1 ] && echo 0 || echo 1)
+jq -cn --arg check "MEM-GATE" --argjson exit "$exit_code" \
+  --arg ev "probes: port5060_hits=$h1 failclosed_hits=$h2 config_storage_hits=$h3 agent=${MEM0_AGENT_ID:-qbx-harness}" \
+  --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  '{check:$check,exit:$exit,evidence:$ev,ts:$ts}'
+exit "$exit_code"

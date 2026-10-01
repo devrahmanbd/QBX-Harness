@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# bin/ingest-memory — chunked ingestion. exit 0 all stored / 1 missing source.
+set -uo pipefail
+H=/root/qbx-harness; M="$H/bin/mem0"
+srcs=()
+if [ "${1:-}" = "--sources" ]; then shift; srcs=("$@")
+else
+  cd /root/QBX || exit 1
+  for f in docs/freeswitch-reference.md docs/freeswitch-books-index.md \
+           docs/deploy/freeswitch-queue-dialplan.md deploy/freeswitch/README.md \
+           docs/architecture/freeswitch-*.md; do
+    [ -f "$f" ] && srcs+=("$f")
+  done
+  while IFS= read -r f; do srcs+=("$f"); done < <(find "$H/knowledge" -name '*.md' -type f 2>/dev/null)
+fi
+[ "${#srcs[@]}" -gt 0 ] || { echo "ingest: no sources" >&2; exit 1; }
+fail=0; chunks_total=0
+for f in "${srcs[@]}"; do
+  [ -f "$f" ] || { echo "ingest: missing source $f" >&2; fail=1; continue; }
+  # NUL-separated ≤4000-char chunks at paragraph boundaries
+  while IFS= read -r -d '' chunk; do
+    chunks_total=$((chunks_total+1))
+    "$M" add --wait "source: $f
+
+$chunk" >/dev/null 2>&1 || { echo "ingest: store failed ($f chunk #$chunks_total)" >&2; fail=1; }
+  done < <(python3 - "$f" <<'PY'
+import sys, re
+text = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+paras = [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
+buf, size = [], 0
+for p in paras:
+    if size + len(p) + 2 > 4000 and buf:
+        sys.stdout.write(''.join(x + '\n\n' for x in buf) + '\0'); buf, size = [], 0
+    buf.append(p); size += len(p) + 2
+if buf:
+    sys.stdout.write(''.join(x + '\n\n' for x in buf) + '\0')
+PY
+)
+done
+echo "ingest: sources=${#srcs[@]} chunks=$chunks_total fail=$fail"
+exit "$fail"
