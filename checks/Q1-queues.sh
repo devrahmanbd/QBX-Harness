@@ -9,6 +9,6 @@ db=$("${HOST_NS[@]}" psql "${DATABASE_URL:-$(grep -h '^DATABASE_URL=' /root/QBX/
   -c "SELECT count(*) || ' queues: ' || coalesce(string_agg(name||'/'||strategy, ','), 'none configured') FROM queues" 2>/dev/null) \
   || emit Q1 3 "queues table query failed"
 # NOTE: esl() is a shell function; timeout(1) cannot exec functions, so inline its body here, interpolating the shared ${HOST_NS[*]} array.
-fifo=$(run_to 15 bash -c "exec ${HOST_NS[*]} python3 /root/esl_api.py 'fifo list'" 2>/dev/null | tr '\n' ' ' | cut -c1-300)
-grep -qi 'ringall' <<<"$fifo" || emit Q1 1 "fifo list lacks ringall strategy: $fifo"
+fifo=$(run_to 15 bash -c "exec ${HOST_NS[*]} python3 /root/esl_api.py 'fifo list'" 2>/dev/null | tr '\n' ' ')
+grep -qi 'ringall' <<<"$fifo" || emit Q1 1 "fifo list lacks ringall strategy: $(cut -c1-300 <<<"$fifo")"
 emit Q1 0 "service=active; $db; fifo ringall present sample=$(cut -c1-120 <<<"$fifo")"
