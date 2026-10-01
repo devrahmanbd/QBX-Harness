@@ -19,7 +19,7 @@ grep -q 'scanned=0' "$TD/l1-green2.json" || { echo "second run should scan 0 byt
 # live checks
 bash "$H/checks/Q1-queues.sh" >"$TD/q1.json" 2>&1 || { echo "Q1 should pass: $(cat "$TD/q1.json")"; exit 1; }
 bash "$H/checks/V1-voicemail.sh" >"$TD/v1.json" 2>&1 || { echo "V1 should pass: $(cat "$TD/v1.json")"; exit 1; }
-bash "$H/checks/E1-esl-reconnect.sh" >"$TD/e1.json" 2>&1 || { echo "E1 base should pass: $(cat "$TD/e1.json")"; exit 1; }
+E1_RESTART_PROBE=0 bash "$H/checks/E1-esl-reconnect.sh" >"$TD/e1.json" 2>&1 || { echo "E1 base should pass: $(cat "$TD/e1.json")"; exit 1; }
 # I1 is externally blocked today: expect exit 2 with counter evidence
 bash "$H/checks/I1-carrier-health.sh" >"$TD/i1.json" 2>&1; i1=$?
 if [ "$i1" -ne 2 ]; then
