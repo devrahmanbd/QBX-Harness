@@ -11,6 +11,10 @@ s4_cleanup() {
   local flush ver
   flush=$(esl "sofia profile internal flush_inbound_reg ${ext}@${domain}" 2>/dev/null)
   ver=$(esl "sofia status profile internal reg" 2>/dev/null)
+  if [ -z "$ver" ]; then
+    printf 'flush=[%s] verification=unknown (esl unreadable)' "$(tr '\n' ' ' <<<"$flush")"
+    return 1
+  fi
   if grep -q "${ext}@${domain}" <<<"$ver"; then
     printf 'flush=[%s] verification=STILL-REGISTERED' "$(tr '\n' ' ' <<<"$flush")"
     return 1
@@ -51,5 +55,8 @@ for _ in $(seq 1 10); do
   sleep 1
 done
 rm -f /tmp/s4-client.$$
-[ "$cleaned" != yes ] && emit S4 1 "stale registration remained after unregister"
+if [ "$cleaned" != yes ]; then
+  cln=$(s4_cleanup)
+  emit S4 1 "stale registration remained after unregister; cleanup: $cln"
+fi
 emit S4 0 "registered+verified: $reg_line; unregistered clean"
