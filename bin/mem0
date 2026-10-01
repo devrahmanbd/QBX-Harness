@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# bin/mem0 — mem0 REST v1 wrapper. exit 0 ok / 4 non-2xx / 64 usage.
+set -uo pipefail
+BASE="${MEM0_BASE:-https://api.mem0.ai/v1}"
+AGENT="${MEM0_AGENT_ID:-qbx-harness}"
+AUTH=(-H "Authorization: Token ${MEM0_API_KEY:-}")
+usage() { echo "usage: mem0 add [--wait] <text> | search <query> | list | delete <id>" >&2; exit 64; }
+req() {  # req METHOD PATH [JSON_BODY] -> prints body, returns curl http code
+  local m="$1" p="$2" body="${3:-}" code
+  if [ -n "$body" ]; then
+    code=$(curl -s -o "$TMPBODY" -w '%{http_code}' -X "$m" "${AUTH[@]}" \
+      -H 'Content-Type: application/json' -d "$body" "$BASE$p" 2>/dev/null) || code=000
+  else
+    code=$(curl -s -o "$TMPBODY" -w '%{http_code}' -X "$m" "${AUTH[@]}" "$BASE$p" 2>/dev/null) || code=000
+  fi
+  case "$code" in 2??) cat "$TMPBODY"; return 0;; *) echo "mem0: $m $p -> HTTP $code" >&2; return 1;; esac
+}
+TMPBODY=$(mktemp); trap 'rm -f "$TMPBODY"' EXIT
+cmd="${1:-}"; shift || usage
+case "$cmd" in
+  add)
+    wait=""; [ "${1:-}" = "--wait" ] && { wait=1; shift; }
+    text="${1:-}"; [ -z "$text" ] && usage
+    body=$(jq -cn --arg t "$text" --arg a "$AGENT" '{messages:[{role:"user",content:$t}],agent_id:$a}')
+    req POST /memories/ "$body" >/dev/null || exit 4
+    if [ -n "$wait" ]; then  # eventual consistency: poll search ≤60s
+      needle=$(printf '%s' "$text" | head -c 40)
+      for _ in $(seq 1 20); do
+        s=$(req POST /memories/search/ "$(jq -cn --arg q "$needle" --arg a "$AGENT" '{query:$q,agent_id:$a,top_k:5}')" 2>/dev/null) \
+          && printf '%s' "$s" | grep -qF "$needle" && { echo "$s"; exit 0; }
+        sleep 3
+      done
+      echo "mem0: add --wait timeout materializing marker" >&2; exit 4
+    fi
+    cat "$TMPBODY"; exit 0;;
+  search)
+    [ -n "${1:-}" ] || usage
+    req POST /memories/search/ "$(jq -cn --arg q "$1" --arg a "$AGENT" '{query:$q,agent_id:$a,top_k:5}')" || exit 4;;
+  list)   req GET "/memories/?agent_id=$AGENT" || exit 4;;
+  delete) [ -n "${1:-}" ] || usage; req DELETE "/memories/$1/" || exit 4;;
+  *) usage;;
+esac
