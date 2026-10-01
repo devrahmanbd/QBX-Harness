@@ -35,8 +35,10 @@ def main():
     while time.time() < deadline:
         try:
             data, _ = s.recvfrom(65535)
-        except (socket.timeout, OSError):   # closed port -> ICMP refused -> OSError, not a traceback
+        except socket.timeout:
             continue
+        except OSError:               # ICMP refusal is final: short-circuit, don't burn the 8s budget
+            break
         text = data.decode(errors="replace"); any_resp = True
         first = text.split("\r\n")[0]
         ua = next((l.split(":", 1)[1].strip() for l in text.split("\r\n")

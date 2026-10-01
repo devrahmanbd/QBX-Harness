@@ -36,7 +36,8 @@ class Sip(object):
         deadline = time.time() + timeout
         while time.time() < deadline:
             try: data, _ = self.sock.recvfrom(65535)
-            except (socket.timeout, OSError): continue   # closed port -> ICMP refused -> OSError
+            except socket.timeout: continue
+            except OSError: break     # ICMP refusal is final: no response will ever arrive
             text = data.decode(errors="replace"); first = text.split("\r\n")[0]
             if re.match(r"^SIP/2.0 \d\d\d", first): return text
         return ""
