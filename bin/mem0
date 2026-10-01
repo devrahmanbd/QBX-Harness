@@ -8,10 +8,10 @@ usage() { echo "usage: mem0 add [--wait] <text> | search <query> | list | delete
 req() {  # req METHOD PATH [JSON_BODY] -> prints body, returns curl http code
   local m="$1" p="$2" body="${3:-}" code
   if [ -n "$body" ]; then
-    code=$(curl -s -o "$TMPBODY" -w '%{http_code}' -X "$m" "${AUTH[@]}" \
+    code=$(curl -s -o "$TMPBODY" -w '%{http_code}' --max-time 20 --connect-timeout 10 -X "$m" "${AUTH[@]}" \
       -H 'Content-Type: application/json' -d "$body" "$BASE$p" 2>/dev/null) || code=000
   else
-    code=$(curl -s -o "$TMPBODY" -w '%{http_code}' -X "$m" "${AUTH[@]}" "$BASE$p" 2>/dev/null) || code=000
+    code=$(curl -s -o "$TMPBODY" -w '%{http_code}' --max-time 20 --connect-timeout 10 -X "$m" "${AUTH[@]}" "$BASE$p" 2>/dev/null) || code=000
   fi
   case "$code" in 2??) cat "$TMPBODY"; return 0;; *) echo "mem0: $m $p -> HTTP $code" >&2; return 1;; esac
 }
