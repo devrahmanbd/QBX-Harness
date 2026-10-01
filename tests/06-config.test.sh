@@ -6,7 +6,9 @@ trap 'rm -rf "$TD"' EXIT
 bash "$H/checks/C1-config-integrity.sh" >/dev/null 2>&1 && c1_live=0 || c1_live=$?
 [ "$c1_live" -eq 0 ] || { echo "C1 live should pass"; exit 1; }
 # build broken entrypoint copy from the real one (repo untouched; runtime copy lives in $TD)
+grep -cE 'FS_[A-Z_]*_SIP_PORT' /root/QBX/deploy/freeswitch/entrypoint.sh >/dev/null || { echo "C1 fixture premise gone"; exit 1; }
 sed 's/FS_[A-Z_]*_SIP_PORT/REMOVED_PORT/g' /root/QBX/deploy/freeswitch/entrypoint.sh > "$TD/entrypoint-broken.gen.sh"
+! grep -qE 'FS_[A-Z_]*_SIP_PORT' "$TD/entrypoint-broken.gen.sh" || { echo "sed did not strip"; exit 1; }
 C1_ENTRYPOINT="$TD/entrypoint-broken.gen.sh" bash "$H/checks/C1-config-integrity.sh" >"$TD/c1-red.json" 2>&1
 [ $? -eq 1 ] || { echo "C1 broken entrypoint should be 1"; exit 1; }
 C2_SCAN_DIR="$F" bash "$H/checks/C2-tenant-key.sh" >/dev/null 2>&1 && { echo "C2 fixture dir (code tenant_id) should fail"; exit 1; }
