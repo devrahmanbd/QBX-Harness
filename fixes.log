@@ -28,3 +28,4 @@
    3  backend/pkg/logger
    3  backend/pkg/campaign
    1  backend/services/call-control-service/internal/recordinglifecycle/lifecycle.go (only non-pkg hit)
+2026-10-02T01:46:28Z V1 temp-file residue ACCEPTED (review item 12): SIGKILL between mktemp and rm can leave a .harness-v1.* orphan in the recordings dir — accepted as residue risk (SIGKILL is untrappable, no trap added; one-line housekeeping handles any orphan), never affects V1 verdicts since writability is judged by create+delete within the same run.
