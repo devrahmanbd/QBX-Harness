@@ -1,0 +1,15 @@
+[Unit]
+Description=QBX FreeSWITCH harness supervised run
+Wants=network.target
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/root/qbx-harness
+# Full loop (memory paths degrade gracefully while mem0 quota is dead).
+# E1 restart probe is OFF here (needs explicit E1_RESTART_PROBE=1) — base checks only.
+ExecStart=/root/qbx-harness/bin/loop
+StandardOutput=journal
+StandardError=journal
