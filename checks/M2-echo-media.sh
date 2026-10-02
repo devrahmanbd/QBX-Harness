@@ -14,7 +14,9 @@ ext_secret=$("${HOST_NS[@]}" psql "${DATABASE_URL:-$(grep -h '^DATABASE_URL=' /r
 caller=$!; unset ext_secret
 uuid=""
 for _ in $(seq 1 6); do
-  ch=$(esl "show channels" 2>/dev/null); uuid=$(awk -F, '/^[0-9a-f]{8}-[0-9a-f-]{27}/ && /,echo,/ {print $1; exit}' <<<"$ch")
+  ch=$(esl "show channels" 2>/dev/null)
+  # newest echo leg by created_epoch — dead/older legs must never shadow the live call
+  uuid=$(awk -F, '/^[0-9a-f]{8}-[0-9a-f-]{27}/ && /,echo,/ {if ($4+0 > max) {max=$4+0; id=$1}} END {if (id != "") print id}' <<<"$ch")
   [ -n "$uuid" ] && break; sleep 1
 done
 if [ -z "$uuid" ]; then kill "$caller" 2>/dev/null; wait "$caller" 2>/dev/null
