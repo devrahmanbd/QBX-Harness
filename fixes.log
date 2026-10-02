@@ -11,3 +11,20 @@
 2026-10-02T00:57:17Z C2 open-finding: forbidden tenant-key pattern reported 101 real code hits (e.g. backend/pkg/backup/backup.go TenantID json:tenant_id, backup_test.go map key tenant_id) — truthful finding; no fix-safe fix exists (architectural: JSON field/tag naming is load-bearing for backup format compatibility); untouched, never to be auto-fixed.
 2026-10-02T00:57:17Z I1 blocked(2): DIDX sent 0 packets (rule counter) — awaiting user-run DIDX portal 'Test Now'; capture with nsenter -t 1 -n tcpdump -ni any udp port 5060 during that test, then bin/loop --only I1. No tcpdump now.
 2026-10-02T00:57:17Z S2: prepared worktree fix s2b-ua-fix at /root/QBX-s2b-fix (cut from main@06508c3); one grep||sed block mirroring external pattern adds <param name="user-agent-string" value="QBX-SBC"/> to regenerated internal.xml; evidence: grep lines 290-291 (internal) vs 297-298 (external), bash -n OK, diffstat 'entrypoint.sh | 3 +++ (1 file, 3 insertions)', idempotence re-run ua_lines 1 -> 1; awaiting user review — not committed
+2026-10-02T01:16:32Z C1 cleanup DEFERRED: 'list also gated — deletion deferred to unblock' — MEM0_AGENT_ID=qbx-harness bin/mem0 list (GET /memories/) returned 'mem0: GET /memories/?agent_id=qbx-harness -> HTTP 429', so the 18 run-summary memories (agent qbx-harness, ADD quota healthy during the real run) could not be selected or deleted this round; before/after counts unavailable. Intended filter once unblocked: jq -r '.[] | select(.memory | test("^2026[0-9]{4}T[0-9]{6}Z-")) | .id' then bin/mem0 delete each, re-list verify zero run-id memories. Unblock: fresh MEM0_API_KEY or Nov-1 quota reset. Rationale for the record: delete-first-before-seed procedure closes the false-pass hole without a gate change (4th probe declined).
+2026-10-02T01:16:32Z selector fix committed as 44d6f37 after Step 9 — fixes.log:9's NOT-committed note is superseded
+2026-10-02T01:16:32Z C2 per-package distribution (re-derived with the check's own grep: grep -rEnH '\btenant_id\b|qbx_tenant_id' --include='*.go' /root/QBX | grep -vE ':[0-9]+:[[:space:]]*//'; total=101), corrects the backup-only justification:
+  27  backend/pkg/events
+  12  backend/pkg/privacy
+  10  backend/pkg/qubicle
+   8  backend/pkg/entitlements
+   7  backend/pkg/publicapi
+   6  backend/pkg/pilot
+   5  backend/pkg/plugin
+   5  backend/pkg/mcpplatform
+   5  backend/pkg/agentpilot
+   5  backend/pkg/agent
+   4  backend/pkg/backup
+   3  backend/pkg/logger
+   3  backend/pkg/campaign
+   1  backend/services/call-control-service/internal/recordinglifecycle/lifecycle.go (only non-pkg hit)
