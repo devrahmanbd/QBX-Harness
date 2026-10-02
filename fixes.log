@@ -29,3 +29,4 @@
    3  backend/pkg/campaign
    1  backend/services/call-control-service/internal/recordinglifecycle/lifecycle.go (only non-pkg hit)
 2026-10-02T01:46:28Z V1 temp-file residue ACCEPTED (review item 12): SIGKILL between mktemp and rm can leave a .harness-v1.* orphan in the recordings dir — accepted as residue risk (SIGKILL is untrappable, no trap added; one-line housekeeping handles any orphan), never affects V1 verdicts since writability is judged by create+delete within the same run.
+2026-10-02T01:59:30Z L1 semantic note: new_errors now EXCLUDES severity-classed lines that contain CRASH (they are counted crash-only) — a verdict-neutral de-double-count introduced by the severity-class change; verdicts unchanged (emit still fires on errs+crash > 0), and the error fixture's [CRIT] CRASH line lands in new_crash only.

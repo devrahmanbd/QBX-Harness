@@ -34,8 +34,14 @@ if [ "$i1" -ne 2 ]; then
   [ "$i1" -eq 0 ] && grep -qE 'packets=[1-9]' "$TD/i1.json" || { echo "I1 want 2 (or 0 with traffic): $i1 $(cat "$TD/i1.json")"; exit 1; }
 fi
 # E1 restart probe (spec restart clause) — opt-in: outer env gates it (Task 10 runs the suite
-# with E1_RESTART_PROBE=1); inner invocation keeps E1_RESTART_PROBE=1 for the check itself
+# with E1_RESTART_PROBE=1); inner invocation keeps E1_RESTART_PROBE=1 for the check itself.
+# Dormant until a trunk exists: zero gateways makes the check decline with blocked(2) BEFORE the probe block.
 if [ "${E1_RESTART_PROBE:-0}" = "1" ]; then
-  E1_RESTART_PROBE=1 bash "$H/checks/E1-esl-reconnect.sh" >"$TD/e1r.json" 2>&1 || { echo "E1 restart probe: $(cat "$TD/e1r.json")"; exit 1; }
+  E1_RESTART_PROBE=1 bash "$H/checks/E1-esl-reconnect.sh" >"$TD/e1r.json" 2>&1; e1r=$?
+  if [ "$e1r" -eq 2 ] && grep -q 'no gateways listed' "$TD/e1r.json"; then
+    echo "restart probe declined: no gateways (trunk pending) — coverage resumes post-trunk"
+  elif [ "$e1r" -ne 0 ]; then
+    echo "E1 restart probe: $(cat "$TD/e1r.json")"; exit 1
+  fi
 fi
 echo ok
