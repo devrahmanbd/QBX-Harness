@@ -17,8 +17,9 @@ mkdir -p "$TREE/backend/pkg/telecom" "$TREE/backend/services/api-gateway/interna
 printf 'package x\nvar _ = "qbx_sub_id=00000000-0000-0000-0000-000000000000"\n' > "$TREE/backend/pkg/telecom/dialplan.go"
 printf 'package x\nvar _ = "qbx_sub_id"\n' > "$TREE/backend/services/api-gateway/internal/freeswitchresolver/resolver.go"
 printf 'package x\nvar TenantID = os.Getenv("tenant_id")\n' > "$TREE/backend/services/call-control-service/evil.go"
-# fail-closed scope: every telepathy dir must exist (same list as the check)
-for t in backend/services/api-gateway/internal/handler backend/services/api-gateway/internal/freeswitchresolver backend/services/call-control-service backend/services/freeswitch-config-service backend/services/billing-service backend/services/dialer-service backend/pkg/telecom backend/services/websocket-gateway deploy/freeswitch deploy/telecom; do mkdir -p "$TREE/$t"; done
+# fail-closed scope: every telepathy dir must exist — list sourced from the check
+# itself (single source of truth; drift fails loudly via the exit-3 pin below)
+for t in $(sed -n 's/^telepaths="\(.*\)"$/\1/p' "$H/checks/C2-tenant-key.sh"); do mkdir -p "$TREE/$t"; done
 C2_SCAN_DIR="$TREE" bash "$H/checks/C2-tenant-key.sh" >"$TD/c2tree.json" 2>&1; tree_rc=$?
 [ "$tree_rc" -eq 1 ] || { echo "C2 synthetic tree should be exit 1, got $tree_rc"; exit 1; }
 grep -q 'forbidden tenant key' "$TD/c2tree.json" || { echo "C2 tree miss not detection-shaped"; exit 1; }
