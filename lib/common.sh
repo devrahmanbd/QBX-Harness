@@ -13,10 +13,10 @@ HOST_NS=(nsenter -t 1 -n)
   export "$line"
 done < "$HARNESS_ROOT/.env"
 redact() { sed -E \
-  -e 's/((PASSWORD|TOKEN|SECRET|API_KEY|EXT_SECRET|JWT)[_A-Z]*)=[^[:space:]]+/\1=<redacted>/Ig' \
+  -e 's/((PASSWORD|TOKEN|SECRET|API_KEY|EXT_SECRET|JWT)[_A-Z]*)=[^[:space:]",}]+/\1=<redacted>/Ig' \
   -e 's/"([_A-Z0-9]*(PASSWORD|TOKEN|SECRET|API_KEY|EXT_SECRET|JWT)[_A-Z]*)"([[:space:]]*:[[:space:]]*)"[^"]*"/"\1": "<redacted>"/Ig' \
-  -e 's/((PASSWORD|TOKEN|SECRET|API_KEY|EXT_SECRET|JWT)[_A-Z]*)[[:space:]]*:[[:space:]]*[^[:space:]]+/\1: <redacted>/Ig' \
-  -e 's/(Authorization:[[:space:]]*(Bearer|Token)[[:space:]]+)[^[:space:]]+/\1<redacted>/Ig'; }
+  -e 's/((PASSWORD|TOKEN|SECRET|API_KEY|EXT_SECRET|JWT)[_A-Z]*)[[:space:]]*:[[:space:]]*[^[:space:]",}]+/\1: <redacted>/Ig' \
+  -e 's/(Authorization:[[:space:]]*(Bearer|Token)[[:space:]]+)[^[:space:]"]+/\1<redacted>/Ig'; }
 emit() {  # emit <check-id> <exit> <evidence...>  — the ONLY stdout of a check
   local id="$1" code="$2"; shift 2
   local ev; ev=$(printf '%s' "$*" | tr '\n' ' ' | cut -c1-3500)

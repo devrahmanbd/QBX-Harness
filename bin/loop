@@ -6,30 +6,44 @@ H="${HARNESS_ROOT:-/root/qbx-harness}"
 CHECKS_DIR="$H/checks"; RUNS_DIR="$H/runs"; CATALOG_FILE="$H/checks/CATALOG"
 DRY=0; SKIP_GATE=0; NOMEM=0; ONLY=""
 while [ $# -gt 0 ]; do case "$1" in
-  --runs-dir) RUNS_DIR="$2"; shift 2;;
-  --checks-dir) CHECKS_DIR="$2"; shift 2;;
-  --catalog) CATALOG_FILE="$2"; shift 2;;
+  --runs-dir) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; RUNS_DIR="$2"; shift 2;;
+  --checks-dir) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; CHECKS_DIR="$2"; shift 2;;
+  --catalog) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; CATALOG_FILE="$2"; shift 2;;
   --dry-run) DRY=1; SKIP_GATE=1; NOMEM=1; shift;;
   --skip-gate) SKIP_GATE=1; shift;;
   --no-memory) NOMEM=1; SKIP_GATE=1; shift;;
-  --only) ONLY="$2"; shift 2;;
+  --only) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; ONLY="$2"; shift 2;;
   *) echo "unknown arg $1" >&2; exit 64;;
 esac; done
 
-FLAGS="$H/state/loop.flags"; : > "$FLAGS"
-[ "$DRY" -eq 0 ] || echo "dry_run=1" >> "$FLAGS"
+# missing/unreadable catalog dies before any run dir is created
+if [ ! -f "$CATALOG_FILE" ] || [ ! -r "$CATALOG_FILE" ]; then
+  echo "catalog missing or unreadable: $CATALOG_FILE" >&2; exit 66
+fi
+
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"; RUN_DIR="$RUNS_DIR/$RUN_ID"; mkdir -p "$RUN_DIR" "$H/state"
+FLAGS="$H/state/loop.flags"; RUNFLAGS="$RUN_DIR/loop.flags"; : > "$FLAGS"; : > "$RUNFLAGS"
+flag() { printf '%s\n' "$1" >> "$FLAGS"; printf '%s\n' "$1" >> "$RUNFLAGS"; }   # per-run + global, same content
+[ "$DRY" -eq 0 ] || flag "dry_run=1"
 RESULTS="$RUN_DIR/results.jsonl"; : > "$RESULTS"
 MEMDEG=0; CONSEC=0; STOP=""
 
-on_sigint() { [ "$DRY" -eq 1 ] && exit 130
-  echo "aborted=1" >> "$FLAGS"; "$H/bin/report" "$RUN_DIR" >/dev/null 2>&1 || true; exit 130; }
+# uniform abort: always flags + report, always exit 130 (no DRY special-case)
+on_sigint() { flag "aborted=1"
+  "$H/bin/report" "$RUN_DIR" >/dev/null 2>&1
+  [ -s "$RUN_DIR/report.md" ] || echo "loop: report missing or empty: $RUN_DIR/report.md" >&2
+  exit 130; }
 trap on_sigint INT TERM
 
 if [ "$SKIP_GATE" -eq 0 ]; then
   gline=$("$H/bin/memory-gate" 2>/dev/null); g=$?
-  printf '%s\n' "$gline" >> "$RESULTS"
-  if [ "$g" -ne 0 ]; then MEMDEG=1; echo "memory_degraded=1" >> "$FLAGS"
+  line=$(printf '%s' "$gline" | grep -m1 '^{.*}$')
+  printf '%s' "$line" | jq -e . >/dev/null 2>&1 || line=""
+  [ -n "$line" ] || line=$(jq -cn --arg ev "gate produced no valid JSON (rc=$g)" \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{check:"MEM-GATE",exit:1,evidence:$ev,ts:$ts}')
+  # same run_id + redact pipeline as check lines (synthesized text carries no secrets)
+  printf '%s' "$line" | jq -c --arg run "$RUN_ID" '. + {run_id:$run}' | redact >> "$RESULTS"
+  if [ "$g" -ne 0 ]; then MEMDEG=1; flag "memory_degraded=1"
     echo "loop: memory gate FAILED — continuing loudly" >&2; fi
 fi
 
@@ -37,38 +51,47 @@ ids=$(cat "$CATALOG_FILE")
 [ -n "$ONLY" ] && ids="$ONLY"
 for id in $ids; do
   file="$CHECKS_DIR/$id"*.sh; file=$(ls $file 2>/dev/null | head -1)
+  ctx=""
   if [ -z "$file" ] || [ ! -f "$file" ]; then
     line=$(jq -cn --arg c "$id" --argjson e 3 --arg ev "check file not found for $id" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{check:$c,exit:$e,evidence:$ev,ts:$ts}')
+    rc=0   # no check ran — never a timeout; also clears a stale rc from a prior iteration
   else
     mq=$(grep -E '^# memory-query:' "$file" | head -1 | sed 's/^# memory-query:[[:space:]]*//')
     to=$(grep -E '^# timeout:' "$file" | head -1 | sed 's/^# timeout:[[:space:]]*//'); to="${to:-45}"
     if [ "$DRY" -eq 0 ] && [ "$NOMEM" -eq 0 ] && [ -n "$mq" ]; then
-      "$H/bin/mem0" search "$mq" >/dev/null 2>&1 || { MEMDEG=1; echo "memory_degraded=1" >> "$FLAGS"; }
+      mkdir -p "$RUN_DIR/memory"
+      ctx="$RUN_DIR/memory/$id.json"   # discarded search body, kept auditable per run (empty on failure)
+      "$H/bin/mem0" search "$mq" > "$ctx" 2>/dev/null || { MEMDEG=1; flag "memory_degraded=1"; }
     fi
-    out=$(RUN_DIR="$RUN_DIR" timeout "$to" bash "$file" 2>"$H/state/.err.$$"); rc=$?
+    out=$(RUN_DIR="$RUN_DIR" MEM0_CONTEXT_FILE="$ctx" timeout "$to" bash "$file" 2>"$H/state/.err.$$"); rc=$?
     errtail=$(tail -c 300 "$H/state/.err.$$" 2>/dev/null | tr '\n' ' '); rm -f "$H/state/.err.$$"
     line=$(printf '%s' "$out" | grep -m1 '^{.*}$')
+    printf '%s' "$line" | jq -e . >/dev/null 2>&1 || line=""   # non-JSON falls to the synthesized exit-3 fallback
     if [ -z "$line" ]; then
       line=$(jq -cn --arg c "$id" --argjson e 3 \
         --arg ev "check produced no valid JSON line (rc=$rc): $errtail" \
         --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{check:$c,exit:$e,evidence:$ev,ts:$ts}')
       rc=3
     fi
-    real=$(printf '%s' "$line" | jq -r '.exit // 3' 2>/dev/null); real="${real:-3}"
-    case "$real" in 0|1|2|3) :;; *) line=$(printf '%s' "$line" | jq -c --argjson e 3 --arg ev "normalized_from=$real" '.exit=$e, .evidence=(.evidence+" "+$ev)'); real=3;; esac
-    [ "$rc" -eq 124 ] && { line=$(printf '%s' "$line" | jq -c '.exit=3 | .evidence=(.evidence+" timeout")'); real=3; }
-    # consecutive counter: error(3) increments and trips at exactly 3; exit 0/1/2 reset to 0
-    if [ "$real" -eq 3 ]; then CONSEC=$((CONSEC+1)); else CONSEC=0; fi
-    if [ "$CONSEC" -ge 3 ]; then STOP="breaker: 3 consecutive error(3)"; fi
   fi
+  # hoisted after the if/else: synthesized missing-file lines flow through the SAME counter as real results
+  real=$(printf '%s' "$line" | jq -r '.exit // 3' 2>/dev/null); real="${real:-3}"
+  case "$real" in 0|1|2|3) :;; *) line=$(printf '%s' "$line" | jq -c --argjson e 3 --arg ev "normalized_from=$real" '.exit=$e, .evidence=((.evidence // "")+" "+$ev)'); real=3;; esac
+  [ "$rc" -eq 124 ] && { line=$(printf '%s' "$line" | jq -c '.exit=3 | .evidence=((.evidence // "")+" timeout")'); real=3; }
+  # consecutive counter: error(3) increments and trips at exactly 3; exit 0/1/2 reset to 0
+  if [ "$real" -eq 3 ]; then CONSEC=$((CONSEC+1)); else CONSEC=0; fi
+  if [ "$CONSEC" -ge 3 ]; then STOP="breaker: 3 consecutive error(3)"; fi
   printf '%s' "$line" | jq -c --arg run "$RUN_ID" '. + {run_id:$run}' | redact >> "$RESULTS"
   if [ "$DRY" -eq 0 ] && [ "$NOMEM" -eq 0 ]; then
-    ev=$(printf '%s' "$line" | jq -r '.evidence // ""' | cut -c1-300)
+    ev=$(printf '%s' "$line" | jq -r '.evidence // ""' | cut -c1-300 | redact)
     "$H/bin/mem0" add "$(printf '%s' "$RUN_ID: $(printf '%s' "$line" | jq -r '.check') exit $(printf '%s' "$line" | jq -r '.exit') — " "$ev")" >/dev/null 2>&1 \
-      || { MEMDEG=1; echo "memory_degraded=1" >> "$FLAGS"; }
+      || { MEMDEG=1; flag "memory_degraded=1"; }
   fi
   [ -n "$STOP" ] && break
 done
-[ -n "$STOP" ] && echo "$STOP" >> "$FLAGS"
+[ -n "$STOP" ] && flag "$STOP"
 "$H/bin/report" "$RUN_DIR" >/dev/null 2>&1
+if [ ! -s "$RUN_DIR/report.md" ]; then
+  echo "loop: report missing or empty: $RUN_DIR/report.md" >&2; exit 1
+fi
 [ -n "$STOP" ] && exit 1 || exit 0

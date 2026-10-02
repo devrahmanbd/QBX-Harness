@@ -5,7 +5,9 @@ H="${HARNESS_ROOT:-/root/qbx-harness}"
 . "$H/lib/common.sh"
 run="${1:?usage: report <run-dir>}"; res="$run/results.jsonl"
 [ -f "$res" ] || { echo "report: no results.jsonl in $run" >&2; exit 1; }
-flags="$H/state/loop.flags"; fixes="$H/fixes.log"
+flags="$run/loop.flags"; [ -f "$flags" ] || flags="$H/state/loop.flags"
+fixes="$H/fixes.log"; snap="$run/fixes.snapshot"
+[ -f "$snap" ] || { [ -f "$fixes" ] && cp "$fixes" "$snap"; }
 {
   echo "# Harness run $(basename "$run")"
   echo
@@ -25,7 +27,9 @@ flags="$H/state/loop.flags"; fixes="$H/fixes.log"
   echo
   echo "## Fixes"
   echo
-  [ -f "$fixes" ] && cat "$fixes" | redact || echo "- (none recorded)"
+  if [ -f "$snap" ]; then cat "$snap" | redact
+  elif [ -f "$fixes" ]; then cat "$fixes" | redact
+  else echo "- (none recorded)"; fi
   echo
   echo "## Notes"
   echo

@@ -27,4 +27,18 @@ out=$(PATH="$t4" bash "$H/checks/H1-process-container.sh" 2>&1); [ $? -eq 3 ] ||
 printf '%s' "$out" | grep -q 'required tool missing' || { echo "H1 evidence lacks reason"; exit 1; }
 # 5) H3 live
 bash "$H/checks/H3-firewall-surface.sh" >/tmp/h3.json 2>&1; [ $? -eq 0 ] || { echo "H3 should pass: $(cat /tmp/h3.json)"; exit 1; }
+# redaction pins (review Critical 1): value classes must stop at structural chars
+# 6a) KEY=value inside a compact single-line JSON record: record survives, secret gone
+jl=$(bash -c 'HARNESS_ROOT='"$H"'; . "$H/lib/common.sh"; printf "%s" "{\"check\":\"T0\",\"exit\":1,\"evidence\":\"pw=FREESWITCH_ESL_PASSWORD=hunter2\",\"ts\":\"x\"}" | redact' 2>&1)
+case "$jl" in *hunter2*) echo "compact json secret leaked: $jl"; exit 1;; esac
+printf '%s' "$jl" | grep -q '<redacted>' || { echo "compact json redaction marker missing: $jl"; exit 1; }
+printf '%s' "$jl" | jq -e '.check=="T0" and .exit==1 and .ts=="x"' >/dev/null || { echo "KEY=value redact destroyed record: $jl"; exit 1; }
+# 6b) Bearer form inside a compact record: token gone, closing quote/brace intact
+jl=$(bash -c 'HARNESS_ROOT='"$H"'; . "$H/lib/common.sh"; printf "%s" "{\"evidence\":\"Authorization: Bearer abc123token\",\"ts\":\"y\"}" | redact' 2>&1)
+case "$jl" in *abc123token*) echo "bearer record leaked: $jl"; exit 1;; esac
+printf '%s' "$jl" | jq -e '.ts=="y"' >/dev/null || { echo "Bearer redact destroyed record: $jl"; exit 1; }
+# 6c) KEY: value (colon form) inside a compact record: value bounded by structural chars
+jl=$(bash -c 'HARNESS_ROOT='"$H"'; . "$H/lib/common.sh"; printf "%s" "{\"evidence\":\"EXT_SECRET: hunter2\",\"ts\":\"z\"}" | redact' 2>&1)
+case "$jl" in *hunter2*) echo "colon-form secret leaked: $jl"; exit 1;; esac
+printf '%s' "$jl" | jq -e '.ts=="z"' >/dev/null || { echo "colon-form redact destroyed record: $jl"; exit 1; }
 echo ok
