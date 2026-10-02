@@ -17,9 +17,10 @@ C2_SCAN_DIR="$F" C2_ONLY=tenantid-comment.go bash "$H/checks/C2-tenant-key.sh" >
   || { echo "comment-only tenant_id must pass: $(cat "$TD/c2c.json")"; exit 1; }
 C2_SCAN_DIR="$F" C2_ONLY=tenantid-code.go bash "$H/checks/C2-tenant-key.sh" >/dev/null 2>&1 \
   && { echo "code-line tenant_id must fail"; exit 1; }
-C2_SCAN_DIR=/root/QBX bash "$H/checks/C2-tenant-key.sh" >"$TD/c2live.json" 2>&1; c2live=$?
-{ [ "$c2live" -eq 0 ] || [ "$c2live" -eq 1 ]; } || { echo "C2 live crashed ($c2live)"; exit 1; }
-jq -e '.check=="C2" and (.evidence|length>0)' "$TD/c2live.json" >/dev/null || { echo "C2 live bad JSON"; exit 1; }
+C2_SCAN_DIR=/root/QBX bash "$H/checks/C2-tenant-key.sh" >/tmp/c2live.json 2>&1 \
+  || { echo "C2 telephony path should pass: $(cat /tmp/c2live.json)"; exit 1; }
+jq -e '.check=="C2" and .exit==0' /tmp/c2live.json >/dev/null || { echo "C2 live not exit 0"; exit 1; }
+rm -f /tmp/c2live.json
 C2_SCAN_DIR="$F" C3_ONLY=codec-g729.go bash "$H/checks/C3-codec-policy.sh" >/dev/null 2>&1 \
   && { echo "G729 fixture must fail"; exit 1; }
 C2_SCAN_DIR="$F" C3_ONLY=codec-clean.go bash "$H/checks/C3-codec-policy.sh" >/dev/null 2>&1 \
