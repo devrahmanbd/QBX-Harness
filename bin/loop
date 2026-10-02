@@ -73,7 +73,7 @@ for id in $ids; do
       line=$(jq -cn --arg c "$id" --argjson e 3 \
         --arg ev "check produced no valid JSON line (rc=$rc): $errtail" \
         --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{check:$c,exit:$e,evidence:$ev,ts:$ts}')
-      rc=3
+      # rc stays raw on purpose: the 124 arm below must still see a timeout (item 9 pin)
     fi
   fi
   # hoisted after the if/else: synthesized missing-file lines flow through the SAME counter as real results

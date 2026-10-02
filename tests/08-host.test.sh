@@ -6,7 +6,9 @@ trap 'rm -rf "$st" "$TD"' EXIT
 # L1 red fixture
 L1_LOG="$F/freeswitch-error.log" L1_OFFSET_FILE="$st/off" bash "$H/checks/L1-fs-logs.sh" >"$TD/l1-red.json" 2>&1
 [ $? -eq 1 ] || { echo "L1 error fixture should be 1"; exit 1; }
-grep -q 'ERROR' "$TD/l1-red.json" || { echo "L1 evidence must quote ERROR"; exit 1; }
+# severity-class pin: fixture carries 1x[ERR] + 2x[ERROR] (the [CRIT] line is crash=) -> new_errors must be exactly 3, numerically (replaces the loose grep -q ERROR)
+ne=$(grep -oE 'new_errors=[0-9]+' "$TD/l1-red.json" | grep -oE '[0-9]+')
+[ "${ne:-0}" -eq 3 ] || { echo "L1 new_errors=${ne:-none} want 3 (fixture: 1x[ERR]+2x[ERROR])"; exit 1; }
 # cursor advances on red too: second run on the SAME error fixture+offset reports only new bytes
 L1_LOG="$F/freeswitch-error.log" L1_OFFSET_FILE="$st/off" bash "$H/checks/L1-fs-logs.sh" >"$TD/l1-red2.json" 2>&1
 [ $? -eq 0 ] || { echo "L1 error fixture second run should be 0 (cursor advanced): $(cat "$TD/l1-red2.json")"; exit 1; }
@@ -19,7 +21,12 @@ grep -q 'scanned=0' "$TD/l1-green2.json" || { echo "second run should scan 0 byt
 # live checks
 bash "$H/checks/Q1-queues.sh" >"$TD/q1.json" 2>&1 || { echo "Q1 should pass: $(cat "$TD/q1.json")"; exit 1; }
 bash "$H/checks/V1-voicemail.sh" >"$TD/v1.json" 2>&1 || { echo "V1 should pass: $(cat "$TD/v1.json")"; exit 1; }
-E1_RESTART_PROBE=0 bash "$H/checks/E1-esl-reconnect.sh" >"$TD/e1.json" 2>&1 || { echo "E1 base should pass: $(cat "$TD/e1.json")"; exit 1; }
+# E1 base: exit 0, or controller-ruled blocked(2) with pinned evidence while gateways are 0 (known pre-DIDX state)
+E1_RESTART_PROBE=0 bash "$H/checks/E1-esl-reconnect.sh" >"$TD/e1.json" 2>&1; e1=$?
+if [ "$e1" -ne 0 ]; then
+  [ "$e1" -eq 2 ] && grep -q 'no gateways listed' "$TD/e1.json" \
+    || { echo "E1 base should pass (or blocked-2 while trunk pending): $(cat "$TD/e1.json")"; exit 1; }
+fi
 # I1 is externally blocked today: expect exit 2 with counter evidence
 bash "$H/checks/I1-carrier-health.sh" >"$TD/i1.json" 2>&1; i1=$?
 if [ "$i1" -ne 2 ]; then

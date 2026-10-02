@@ -12,10 +12,12 @@ S3_HOST=127.0.0.1 S3_PORT=9 bash "$H/checks/S3-fail-closed.sh" >/dev/null 2>&1
 # S2 green-path isolation: point both ports at the QBX-SBC port
 S2_EXTERNAL_PORT=5060 S2_INTERNAL_PORT=5060 bash "$H/checks/S2-sip-identity.sh" >"$TD/s2-green.json" 2>&1
 [ $? -eq 0 ] || { echo "S2 both-QBX-SBC should be 0: $(cat "$TD/s2-green.json")"; exit 1; }
-# S2 default live: internal port leaks FreeSWITCH UA -> real finding, must be exit 1
+# S2 default live: consistency pin — exit 0 only if evidence lacks FreeSWITCH on ua=/server=, exit 1 must quote it (pre-deploy AND post-deploy both valid)
 bash "$H/checks/S2-sip-identity.sh" >"$TD/s2-live.json" 2>&1; s2=$?
-[ "$s2" -eq 1 ] && grep -qi 'freeswitch' "$TD/s2-live.json" \
-  || { echo "S2 live should be exit 1 quoting FreeSWITCH UA (got $s2)"; exit 1; }
+s2ev=$(jq -r '.evidence // ""' "$TD/s2-live.json" 2>/dev/null)
+{ [ "$s2" -eq 0 ] && ! grep -qiE 'ua=.*freeswitch|server=.*freeswitch' <<<"$s2ev"; } \
+  || { [ "$s2" -eq 1 ] && grep -qi 'freeswitch' <<<"$s2ev"; } \
+  || { echo "S2 live inconsistent (exit $s2): $s2ev"; exit 1; }
 # S3 live: exact spec response
 bash "$H/checks/S3-fail-closed.sh" >"$TD/s3.json" 2>&1
 [ $? -eq 0 ] || { echo "S3 live should pass: $(cat "$TD/s3.json")"; exit 1; }

@@ -5,6 +5,15 @@ H=/root/qbx-harness
 TD=$(mktemp -d)
 RUN_DIR=$(mktemp -d)
 trap 'rm -rf "$TD" "$RUN_DIR"' EXIT   # covers json scratch + RUN_DIR on every path (R-tmp), not just success
+# M2 selector hermetic pin: newest-by-created_epoch beats an older zombie — pure function of its input, no live infra
+eval "$(sed -n '/^m2_select_echo_leg()/,/^}/p' "$H/checks/M2-echo-media.sh")"
+ch_rows=$(cat <<'EOF'
+810ffe97-2110-4d73-9431-88bdfde7112b,inbound,2026-10-02 00:22:51,1790900571,loopback/qbx-test-echo-b,CS_EXECUTE,4000,4000,88.99.250.99,qbx-test-echo,echo,,XML,default
+b418e1ab-2dad-4059-a8b4-cc271d99e91a,inbound,2026-10-02 01:42:27,1790905347,sofia/internal/4000@88.99.250.99,CS_EXECUTE,4000,4000,88.99.250.99,qbx-test-echo,echo,,XML,default
+EOF
+)
+sel=$(m2_select_echo_leg "$ch_rows")
+[ "$sel" = "b418e1ab-2dad-4059-a8b4-cc271d99e91a" ] || { echo "M2 selector must pick newest-by-created_epoch, got '${sel:-none}'"; exit 1; }
 # M1 offline red: unreachable API must be error(3), not a crash
 M1_BASE_URL=http://127.0.0.1:1 RUN_DIR="$TD" bash "$H/checks/M1-lifecycle.sh" >"$TD/m1-red.json" 2>&1
 [ $? -eq 3 ] || { echo "M1 offline should be 3: $(cat "$TD/m1-red.json")"; exit 1; }

@@ -7,7 +7,9 @@ require awk H2; require df H2; require nproc H2; require journalctl H2
 load1=$(awk '{print $1}' /proc/loadavg); ncpu=$(nproc)
 mem_kb=$(awk '/MemAvailable/{print $2}' /proc/meminfo)
 disk_pct=$(df -P / | awk 'NR==2{gsub("%","");print $5}')
-oom=$(journalctl -k --since "${H2_SINCE:--24h}" --no-pager 2>/dev/null | grep -ciE 'out of memory|oom-kill' || true)
+jraw=$(journalctl -k --since "${H2_SINCE:--24h}" --no-pager 2>/dev/null); jrc=$?
+if [ "$jrc" -ne 0 ] || [ -z "$jraw" ]; then emit H2 3 "kernel journal unreadable: journalctl rc=$jrc bytes=${#jraw}"; fi
+oom=$(grep -ciE 'out of memory|oom-kill' <<<"$jraw" || true)
 case "$load1" in ''|*[!0-9.]*|*.*.*) emit H2 3 "could not read load1 from /proc/loadavg";; esac
 case "$ncpu" in ''|*[!0-9]*) emit H2 3 "could not read cpu count";; esac
 case "$mem_kb" in ''|*[!0-9]*) emit H2 3 "could not read MemAvailable from /proc/meminfo";; esac

@@ -33,6 +33,6 @@ fixes="$H/fixes.log"; snap="$run/fixes.snapshot"
   echo
   echo "## Notes"
   echo
-  echo "- every evidence string above is copied from results.jsonl for this run_id; no other claims are made."
+  echo "- Findings/table rows are this run's; Fixes is the cumulative operator journal."
 } | redact > "$run/report.md"
 echo "$run/report.md"

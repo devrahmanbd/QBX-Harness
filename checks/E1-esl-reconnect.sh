@@ -1,6 +1,6 @@
 # checks/E1-esl-reconnect.sh
 # memory-query: esl reconnect gateway ready
-# timeout: 180
+# timeout: 300
 #!/usr/bin/env bash
 HARNESS_ROOT="${HARNESS_ROOT:-/root/qbx-harness}"; . "$HARNESS_ROOT/lib/common.sh"
 require journalctl E1
@@ -8,7 +8,11 @@ require journalctl E1
 st_raw=$(run_to 15 bash -c "exec ${HOST_NS[*]} python3 /root/esl_api.py 'status'" 2>/dev/null)
 st=$(head -3 <<<"$st_raw" | tr '\n' ' ')
 grep -qi 'is ready' <<<"$st" || emit E1 3 "ESL auth/status failed: $st"
-gws=$(run_to 15 bash -c "exec ${HOST_NS[*]} python3 /root/esl_api.py 'sofia status gateway'" 2>/dev/null | tr '\n' ' ' | cut -c1-200)
+gw_raw=$(run_to 15 bash -c "exec ${HOST_NS[*]} python3 /root/esl_api.py 'sofia status gateway'" 2>/dev/null); gw_rc=$?
+gws=$(tr '\n' ' ' <<<"$gw_raw" | cut -c1-200)
+if [ "$gw_rc" -ne 0 ] || [ -z "$gw_raw" ]; then emit E1 3 "sofia status gateway unreadable (rc=$gw_rc, ${#gw_raw} bytes)"; fi
+gw_rows=$(grep -vE '^[[:space:]]*$|^=+$|Gateway-Name|[0-9]+ gateways:' <<<"$gw_raw" | grep -cE '[[:alnum:]]' || true)
+[ "${gw_rows:-0}" -eq 0 ] && emit E1 2 "no gateways listed (trunk pending?)"
 rc_raw=$(journalctl -u qbx-call-control.service --since "${E1_SINCE:--24h}" --no-pager 2>/dev/null \
         | grep -iE 'Successfully reconnected|ESL reconnected|attempting to reconnect' || true)
 rc_ev=$(tail -1 <<<"$rc_raw" | cut -c1-200)

@@ -92,4 +92,10 @@ d=$(run_loop "zz-pass-a,zz-pass-b" --only zz-pass-a); rc=$?
 # 12) unknown arg -> exit 64
 d=$(run_loop "zz-pass-a" --bogus); rc=$?
 [ "$rc" -eq 64 ] || { echo "unknown-arg rc=$rc want 64"; exit 1; }
+# 13) header-parse arm: fixture carries '# timeout: 1' on its own col-0 line (real-check format) -> killed at 1s, exit 3 + timeout evidence
+grep -qE '^# timeout: 1$' "$F/zz-timeout.sh" || { echo "zz-timeout fixture lacks col-0 '# timeout: 1' header"; exit 1; }
+d=$(run_loop "zz-timeout"); rc=$?
+[ "$rc" -eq 0 ] || { echo "timeout stub loop rc=$rc want 0"; exit 1; }
+grep -q '"exit":3' "$d"/runs/*/results.jsonl || { echo "timeout stub should be exit 3"; exit 1; }
+grep -q ' timeout' "$d"/runs/*/results.jsonl || { echo "timeout missing from evidence (header not parsed?)"; exit 1; }
 echo ok

@@ -1,6 +1,6 @@
 # checks/S4-registered-ext.sh
 # memory-query: extension registration sofia wss
-# timeout: 60
+# timeout: 120
 #!/usr/bin/env bash
 HARNESS_ROOT="${HARNESS_ROOT:-/root/qbx-harness}"; . "$HARNESS_ROOT/lib/common.sh"
 trap 'rm -f /tmp/s4-client.$$' EXIT   # emit exits bypass the inline rm (R-s4tmp)

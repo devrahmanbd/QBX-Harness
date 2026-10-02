@@ -12,11 +12,14 @@ ext_secret=$("${HOST_NS[@]}" psql "${DATABASE_URL:-$(grep -h '^DATABASE_URL=' /r
 "${HOST_NS[@]}" python3 "$HARNESS_ROOT/checks/lib/sip_caller.py" 88.99.250.99 5080 qbx-test-echo \
   "${M2_SECONDS:-10}" --user "$ext" --pass "$ext_secret" >"$RUN_DIR/m2-caller.out" 2>&1 &
 caller=$!; unset ext_secret
+# pure selector of `show channels` rows: newest echo leg by created_epoch (strict >, first-wins tie-break) — dead/older legs can never shadow the live call
+m2_select_echo_leg() {
+  awk -F, '/^[0-9a-f]{8}-[0-9a-f-]{27}/ && /,echo,/ {if ($4+0 > max) {max=$4+0; id=$1}} END {if (id != "") print id}' <<<"$1"
+}
 uuid=""
 for _ in $(seq 1 6); do
   ch=$(esl "show channels" 2>/dev/null)
-  # newest echo leg by created_epoch — dead/older legs must never shadow the live call
-  uuid=$(awk -F, '/^[0-9a-f]{8}-[0-9a-f-]{27}/ && /,echo,/ {if ($4+0 > max) {max=$4+0; id=$1}} END {if (id != "") print id}' <<<"$ch")
+  uuid=$(m2_select_echo_leg "$ch")
   [ -n "$uuid" ] && break; sleep 1
 done
 if [ -z "$uuid" ]; then kill "$caller" 2>/dev/null; wait "$caller" 2>/dev/null
