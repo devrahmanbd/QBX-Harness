@@ -43,13 +43,15 @@ def main():
         first = text.split("\r\n")[0]
         ua = next((l.split(":", 1)[1].strip() for l in text.split("\r\n")
                    if l.lower().startswith("user-agent:")), "-")
+        srv = next((l.split(":", 1)[1].strip() for l in text.split("\r\n")
+                    if l.lower().startswith("server:")), "-")
         last = first
-        print("status=%s" % first); print("ua=%s" % ua)
+        print("status=%s" % first); print("ua=%s" % ua); print("server=%s" % srv)
         if not first.startswith("SIP/2.0 100"):       # skip provisional, keep final
             break
     s.close()
     if not any_resp:
-        print("status=NO-RESPONSE"); print("ua=-"); return 1
+        print("status=NO-RESPONSE"); print("ua=-"); print("server=-"); return 1
     print("reason=%s" % last); return 0
 
 sys.exit(main())

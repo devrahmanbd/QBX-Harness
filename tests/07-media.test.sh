@@ -22,6 +22,6 @@ in_n=$(printf '%s' "$ev" | grep -oE '(^| )in=[0-9]+' | grep -oE '[0-9]+'); out_n
 [ "${in_n:-0}" -gt 50 ] && [ "${out_n:-0}" -gt 50 ] || { echo "counters below floor: in=$in_n out=$out_n"; exit 1; }
 grep -q 'invite=.*200' "$RUN_DIR/m2-caller.out" && grep -q 'bye=.*200' "$RUN_DIR/m2-caller.out" \
   || { echo "caller did not complete cleanly"; exit 1; }
-left=$(nsenter -t 1 -n python3 /root/esl_api.py "show channels" 2>/dev/null | grep -c 'total')
-[ "${left:-1}" -eq 1 ] || { echo "channels not empty after checks"; exit 1; }  # grep -c 'total.' line == 1 means "0 total."
+left=$(nsenter -t 1 -n python3 /root/esl_api.py "show channels" 2>/dev/null | grep -oE '^[0-9]+ total\.' | sed 's/ total\.//')
+[ "${left:-1}" -eq 0 ] || { echo "channels not empty after checks (total=${left:-none})"; exit 1; }  # numeric "N total." == 0 means truly empty
 echo ok

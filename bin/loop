@@ -23,7 +23,9 @@ fi
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"; RUN_DIR="$RUNS_DIR/$RUN_ID"; mkdir -p "$RUN_DIR" "$H/state"
 FLAGS="$H/state/loop.flags"; RUNFLAGS="$RUN_DIR/loop.flags"; : > "$FLAGS"; : > "$RUNFLAGS"
-flag() { printf '%s\n' "$1" >> "$FLAGS"; printf '%s\n' "$1" >> "$RUNFLAGS"; }   # per-run + global, same content
+flag() { # idempotent: identical lines collapse (19 repeats -> 1)
+  grep -qxF "$1" "$FLAGS" || printf '%s\n' "$1" >> "$FLAGS"
+  grep -qxF "$1" "$RUNFLAGS" || printf '%s\n' "$1" >> "$RUNFLAGS"; }   # per-run + global, same content
 [ "$DRY" -eq 0 ] || flag "dry_run=1"
 RESULTS="$RUN_DIR/results.jsonl"; : > "$RESULTS"
 MEMDEG=0; CONSEC=0; STOP=""

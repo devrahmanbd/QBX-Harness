@@ -23,7 +23,7 @@ fixes="$H/fixes.log"; snap="$run/fixes.snapshot"
   echo
   echo "## Findings"
   echo
-  jq -r 'select(.exit!=0 and .check!="MEM-GATE") | "- **\(.check)** exit=\(.exit): \(.evidence)"' "$res" 2>/dev/null
+  jq -r 'select(.exit!=0) | "- **\(.check)** exit=\(.exit): \(.evidence)"' "$res" 2>/dev/null
   echo
   echo "## Fixes"
   echo
