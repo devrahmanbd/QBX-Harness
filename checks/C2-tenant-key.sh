@@ -8,7 +8,7 @@ dir="${C2_SCAN_DIR:-/root/QBX}"
 [ -d "$dir" ] || emit C2 3 "scan dir missing: $dir"
 # Revised invariant (user decision): tenant_id is forbidden in the telephony/call
 # path only; a parallel tenant_id model exists outside it. Scan exactly these dirs.
-telepaths="backend/services/api-gateway/internal/handler backend/services/api-gateway/internal/freeswitchresolver backend/services/call-control-service backend/pkg/telecom backend/services/websocket-gateway deploy/freeswitch"
+telepaths="backend/services/api-gateway/internal/handler backend/services/api-gateway/internal/freeswitchresolver backend/services/call-control-service backend/services/freeswitch-config-service backend/services/billing-service backend/services/dialer-service backend/pkg/telecom backend/services/websocket-gateway deploy/freeswitch deploy/telecom"
 if [ -n "${C2_ONLY:-}" ]; then
   target="$dir/$C2_ONLY"
   [ -e "$target" ] || emit C2 3 "target missing: $target"
