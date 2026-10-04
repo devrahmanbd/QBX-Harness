@@ -1,0 +1,11 @@
+[Unit]
+Description=QBX PostgreSQL retention (journal 7d, outbox pending 7d)
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/root/qbx-harness
+ExecStart=/root/qbx-harness/bin/pg-retention --apply
+StandardOutput=journal
+StandardError=journal
