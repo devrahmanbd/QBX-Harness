@@ -12,12 +12,13 @@ head -n1 "$M3" 2>/dev/null | grep -qx '# checks/M3-voicemail.sh' \
   || { echo "M3 line 1 must be the filename comment '# checks/M3-voicemail.sh'"; exit 1; }
 grep -qE '^# memory-query: .+' "$M3" || { echo "M3 lacks col-0 '# memory-query:' line"; exit 1; }
 grep -qE '^# timeout: [0-9]+$' "$M3" || { echo "M3 lacks col-0 '# timeout:' line"; exit 1; }
-# ---- R2 branch must exist: registered 4000 -> emit M3 2 (transient, retry next run)
-grep -q 'emit M3 2' "$M3" || { echo "M3 lacks registered->blocked(2) branch (R2)"; exit 1; }
-# ---- R1/R4/R5 static guards: never touch voicemail_ivr mode; include_deleted diff; no direct DB access
-grep -q 'voicemail_ivr' "$M3" && { echo "M3 must not reference voicemail_ivr mode (R1: dead transfer target)"; exit 1; }
-grep -q 'include_deleted=true' "$M3" || { echo "M3 lacks include_deleted=true diff (R4)"; exit 1; }
-grep -q 'psql' "$M3" && { echo "M3 must not shell out to psql (R5: verification is API-only here)"; exit 1; }
+# ---- R2 branch must exist as CODE (not a comment): registered 4000 -> emit M3 2
+grep -qE '^[^#]*emit M3 2' "$M3" || { echo "M3 lacks registered->blocked(2) branch (R2)"; exit 1; }
+# ---- R1/R4/R5 static guards scan code only: a mention in a comment must neither break nor satisfy them
+m3code=$(grep -v '^[[:space:]]*#' "$M3")
+grep -q 'voicemail_ivr' <<<"$m3code" && { echo "M3 must not reference voicemail_ivr mode (R1: dead transfer target)"; exit 1; }
+grep -q 'include_deleted=true' <<<"$m3code" || { echo "M3 lacks include_deleted=true diff (R4)"; exit 1; }
+grep -q 'psql' <<<"$m3code" && { echo "M3 must not shell out to psql (R5: verification is API-only here)"; exit 1; }
 
 # ---- baseline: how many live (non-deleted) messages mailbox 4000 has before the run
 . "$H/lib/common.sh"
@@ -41,6 +42,7 @@ grep -q 'ext=4000' <<<"$ev" || { echo "evidence must quote ext=4000: $ev"; exit 
 grep -qE 'caller=15[0-9]{10,}' <<<"$ev" || { echo "evidence must quote unique caller token: $ev"; exit 1; }
 grep -q 'channels=0' <<<"$ev" || { echo "evidence must quote channels=0: $ev"; exit 1; }
 grep -q 'reg=absent' <<<"$ev" || { echo "evidence must quote reg=absent: $ev"; exit 1; }
+grep -q 'wav=retained-by-soft-delete' <<<"$ev" || { echo "evidence must name the WAV exclusion (soft-delete keeps the file): $ev"; exit 1; }
 
 # ---- independent R4 verification: id gone from default list, still visible via include_deleted
 dflt=$("${HOST_NS[@]}" curl -s -H "Authorization: Bearer $base_tok" "$B/api/v1/voicemails?limit=200")
@@ -56,6 +58,6 @@ del_ts=$(jq -r --arg i "$msg" '[.voicemails[]|select(.id==$i)][0].deleted_at // 
 left=$(nsenter -t 1 -n python3 /root/esl_api.py "show channels" 2>/dev/null | grep -oE '^[0-9]+ total\.' | grep -oE '^[0-9]+')
 [ "${left:-1}" -eq 0 ] || { echo "channels not empty after M3 (total=${left:-none})"; exit 1; }
 reg=$(nsenter -t 1 -n python3 /root/esl_api.py "sofia status profile internal reg" 2>/dev/null)
-grep -q '4000@qbx.qubickle.com' <<<"$reg" && { echo "4000 registered after M3"; exit 1; }
+grep -qE "(^|[[:space:]])4000@qbx.qubickle.com([[:space:]]|$)" <<<"$reg" && { echo "4000 registered after M3"; exit 1; }
 grep -q 'Total items returned: 0' <<<"$reg" || { echo "sofia reg status unreadable: $(tr '\n' ' ' <<<"$reg")"; exit 1; }
 echo ok
