@@ -11,7 +11,7 @@ cat >"$TD/mock_sip.py" <<'PYEOF'
 #!/usr/bin/env python3
 import json, random, re, select, socket, struct, sys, time
 
-te = sys.argv[1] == "1"
+mode = sys.argv[1]  # 0=neither, 1=both (PT 101 + rtpmap), pt=m-line only, map=rtpmap only
 stats_path, port_file = sys.argv[2], sys.argv[3]
 sip = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); sip.bind(("127.0.0.1", 0))
 rtp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); rtp.bind(("127.0.0.1", 0))
@@ -72,11 +72,18 @@ while time.time() < deadline:
         m = re.search(r"^m=audio[^\r\n]*", sdp, re.M)
         stats["offer_mline"] = m.group(0) if m else ""
         stats["offer_te"] = bool(re.search(r"^a=rtpmap:101[ \t]+telephone-event", sdp, re.M | re.I))
-        if te:
+        if mode == "1":  # full answer: PT 101 in m-line AND telephone-event rtpmap
             asdp = ("v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
                     "m=audio %d RTP/AVP 0 101\r\na=rtpmap:0 PCMU/8000\r\n"
                     "a=rtpmap:101 telephone-event/8000\r\na=fmtp:101 0-15\r\n" % rtp_port)
-        else:
+        elif mode == "pt":  # AND-strictness: PT 101 in m-line but NO telephone-event rtpmap
+            asdp = ("v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+                    "m=audio %d RTP/AVP 0 101\r\na=rtpmap:0 PCMU/8000\r\n" % rtp_port)
+        elif mode == "map":  # AND-strictness: telephone-event rtpmap but 101 absent from m-line
+            asdp = ("v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+                    "m=audio %d RTP/AVP 0 8\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:8 PCMA/8000\r\n"
+                    "a=rtpmap:101 telephone-event/8000\r\n" % rtp_port)
+        else:  # mode "0": neither PT 101 nor rtpmap
             asdp = ("v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
                     "m=audio %d RTP/AVP 0 8\r\na=rtpmap:0 PCMU/8000\r\n"
                     "a=rtpmap:8 PCMA/8000\r\n" % rtp_port)
@@ -103,7 +110,7 @@ with open(stats_path, "w") as fh:
 PYEOF
 
 # helper: start mock, echo pid (fds detached from the $() pipe so it never blocks)
-mock_up() {  # $1=tag $2=te 0|1
+mock_up() {  # $1=tag $2=answer mode: 0|1|pt|map
   python3 "$TD/mock_sip.py" "$2" "$TD/$1.stats.json" "$TD/$1.port" >"$TD/$1.log" 2>&1 &
   echo $!
 }
@@ -131,6 +138,38 @@ grep -q '^bye=SIP/2.0 200' "$TD/a.out" || { echo "A: no clean BYE on fail path: 
 jq -e '.offer_te == true and .bye == true and (.te|length) == 0 and .audio_n == 0' \
   "$TD/a.stats.json" >/dev/null \
   || { echo "A: want offered-te + BYE + zero RTP; got: $(cat "$TD/a.stats.json")"; exit 1; }
+
+# ---- A2) AND-strictness: answer m-line HAS PT 101 but has NO telephone-event rtpmap ----
+a2m=$(mock_up a2 pt)
+mock_wait a2 || { echo "A2: mock never ready"; exit 1; }
+python3 "$H/checks/lib/sip_caller.py" 127.0.0.1 "$(cat "$TD/a2.port")" qbx-test-mock 2 \
+  --dtmf "5" >"$TD/a2.out" 2>&1
+rc=$?
+mock_stats a2 "$a2m" || { echo "A2: mock produced no stats"; exit 1; }
+[ "$rc" -eq 1 ] || { echo "A2: want exit 1 (fail closed), got $rc: $(tr '\n' '|' <"$TD/a2.out")"; exit 1; }
+grep -q '^dtmf=UNAVAILABLE reason=answer-lacks-telephone-event-101$' "$TD/a2.out" \
+  || { echo "A2: missing exact UNAVAILABLE reason: $(tr '\n' '|' <"$TD/a2.out")"; exit 1; }
+grep -q '^dtmf_sent=0$' "$TD/a2.out" || { echo "A2: missing dtmf_sent=0: $(tr '\n' '|' <"$TD/a2.out")"; exit 1; }
+grep -q '^bye=SIP/2.0 200' "$TD/a2.out" || { echo "A2: no clean BYE on fail path: $(tr '\n' '|' <"$TD/a2.out")"; exit 1; }
+jq -e '.bye == true and (.te|length) == 0 and .audio_n == 0' \
+  "$TD/a2.stats.json" >/dev/null \
+  || { echo "A2: want BYE + zero RTP (rtpmap conjunct alone must not pass); got: $(cat "$TD/a2.stats.json")"; exit 1; }
+
+# ---- A3) AND-strictness: answer HAS telephone-event rtpmap but 101 absent from m-line ----
+a3m=$(mock_up a3 map)
+mock_wait a3 || { echo "A3: mock never ready"; exit 1; }
+python3 "$H/checks/lib/sip_caller.py" 127.0.0.1 "$(cat "$TD/a3.port")" qbx-test-mock 2 \
+  --dtmf "5" >"$TD/a3.out" 2>&1
+rc=$?
+mock_stats a3 "$a3m" || { echo "A3: mock produced no stats"; exit 1; }
+[ "$rc" -eq 1 ] || { echo "A3: want exit 1 (fail closed), got $rc: $(tr '\n' '|' <"$TD/a3.out")"; exit 1; }
+grep -q '^dtmf=UNAVAILABLE reason=answer-lacks-telephone-event-101$' "$TD/a3.out" \
+  || { echo "A3: missing exact UNAVAILABLE reason: $(tr '\n' '|' <"$TD/a3.out")"; exit 1; }
+grep -q '^dtmf_sent=0$' "$TD/a3.out" || { echo "A3: missing dtmf_sent=0: $(tr '\n' '|' <"$TD/a3.out")"; exit 1; }
+grep -q '^bye=SIP/2.0 200' "$TD/a3.out" || { echo "A3: no clean BYE on fail path: $(tr '\n' '|' <"$TD/a3.out")"; exit 1; }
+jq -e '.bye == true and (.te|length) == 0 and .audio_n == 0' \
+  "$TD/a3.stats.json" >/dev/null \
+  || { echo "A3: want BYE + zero RTP (m-line conjunct alone must not pass); got: $(cat "$TD/a3.stats.json")"; exit 1; }
 
 # ---- B) sender packet shape: peer answers WITH telephone-event/101 -> RFC2833 events land, well-formed ----
 bm=$(mock_up b 1)
@@ -187,6 +226,21 @@ jq -e '.offer_te == false and (.offer_mline | test("^m=audio [0-9]+ RTP/AVP 0 8$
        and (.te|length) == 0 and .audio_n >= 20 and .ack == true and .bye == true' \
   "$TD/d.stats.json" >/dev/null \
   || { echo "C: legacy offer/RTP changed: $(cat "$TD/d.stats.json")"; exit 1; }
+
+# ---- E) truncated digit: --dtmf-delay beyond `seconds` -> digit never starts, pending evidence + exit 1 ----
+em=$(mock_up e 1)
+mock_wait e || { echo "E: mock never ready"; exit 1; }
+python3 "$H/checks/lib/sip_caller.py" 127.0.0.1 "$(cat "$TD/e.port")" qbx-test-mock 1 \
+  --dtmf "5" --dtmf-delay 1.5 >"$TD/e.out" 2>&1
+rc=$?
+mock_stats e "$em" || { echo "E: mock produced no stats"; exit 1; }
+[ "$rc" -eq 1 ] || { echo "E: want exit 1 (unsent digit), got $rc: $(tr '\n' '|' <"$TD/e.out")"; exit 1; }
+grep -q '^dtmf_pending=5$' "$TD/e.out" || { echo "E: missing dtmf_pending=5: $(tr '\n' '|' <"$TD/e.out")"; exit 1; }
+grep -q '^dtmf_sent=0$' "$TD/e.out" || { echo "E: missing dtmf_sent=0: $(tr '\n' '|' <"$TD/e.out")"; exit 1; }
+grep -q '^dtmf=ok pt=101$' "$TD/e.out" && grep -q '^bye=SIP/2.0 200' "$TD/e.out" \
+  || { echo "E: call did not complete cleanly: $(tr '\n' '|' <"$TD/e.out")"; exit 1; }
+jq -e '(.te|length) == 0 and .bye == true' "$TD/e.stats.json" >/dev/null \
+  || { echo "E: want zero event packets for the never-started digit; got: $(cat "$TD/e.stats.json")"; exit 1; }
 
 # ---- D) live round-trip: FreeSWITCH echo leg accepts te/101, decodes digits (RECV DTMF in FS log) ----
 LOG=/root/QBX/logs/freeswitch/freeswitch.log
