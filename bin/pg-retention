@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# bin/pg-retention — batched retention for QBX event tables. DRY-RUN by default.
-# usage: pg-retention [--apply] [--journal-days N] [--outbox-days N] [--batch N]
-# Policy (user-approved 2026-10-04): journal rows older than 7d go (FK cascade
-# keeps outbox consistent); pending outbox rows older than 7d go. VACUUM ANALYZE
-# only (online) — VACUUM FULL stays a manual quiet-window op. Requires host netns
-# (nsenter) for PG 5435. Exit 0 ok / 1 error / 2 nothing to do (still ok).
+# bin/pg-retention — batched retention for QBX tables. DRY-RUN by default.
+# usage: pg-retention [--apply] [--journal-days N] [--outbox-days N] [--log-days N] [--batch N]
+# Policy (user-approved 2026-10-04/07): journal rows older than 7d go (FK cascade
+# keeps outbox consistent); pending outbox rows older than 7d go; log_entries rows
+# older than 3d go. VACUUM ANALYZE only (online) — VACUUM FULL stays a manual
+# quiet-window op. Requires host netns (nsenter) for PG 5435.
+# Exit 0 ok / 1 error / 2 nothing to do (still ok).
 set -uo pipefail
-APPLY=0; JDAYS=7; ODAYS=7; BATCH=500000
+APPLY=0; JDAYS=7; ODAYS=7; LDAYS=3; BATCH=500000
 while [ $# -gt 0 ]; do case "$1" in
   --apply) APPLY=1; shift;;
   --journal-days) JDAYS="$2"; shift 2;;
   --outbox-days) ODAYS="$2"; shift 2;;
+  --log-days) LDAYS="$2"; shift 2;;
   --batch) BATCH="$2"; shift 2;;
   *) echo "unknown arg $1" >&2; exit 64;;
 esac; done
@@ -19,9 +21,10 @@ DBU=$(grep -h '^DATABASE_URL=' /root/QBX/.env | cut -d= -f2-)
 q() { nsenter -t 1 -n psql "$DBU" -tAX -c "SET statement_timeout='300s'; $1" 2>&1; }
 jscope=$(q "SELECT count(*) FROM telephony_event_journal WHERE occurred_at < NOW() - INTERVAL '$JDAYS days';" | tail -1)
 oscope=$(q "SELECT count(*) FROM telephony_event_outbox WHERE state='pending' AND created_at < NOW() - INTERVAL '$ODAYS days';" | tail -1)
-echo "retention: journal_scope=$jscope outbox_scope=$oscope apply=$APPLY"
+lscope=$(q "SELECT count(*) FROM log_entries WHERE timestamp <= NOW() - INTERVAL '$LDAYS days';" | tail -1)
+echo "retention: journal_scope=$jscope outbox_scope=$oscope log_scope=$lscope apply=$APPLY"
 [ "$APPLY" -eq 0 ] && exit 2
-[ "${jscope:-0}" -eq 0 ] && [ "${oscope:-0}" -eq 0 ] && { echo "retention: nothing to do"; exit 0; }
+[ "${jscope:-0}" -eq 0 ] && [ "${oscope:-0}" -eq 0 ] && [ "${lscope:-0}" -eq 0 ] && { echo "retention: nothing to do"; exit 0; }
 i=0
 while [ "$(q "SELECT count(*) FROM telephony_event_outbox WHERE state='pending' AND created_at < NOW() - INTERVAL '$ODAYS days';" | tail -1)" -gt 0 ] && [ "$i" -lt 40 ]; do
   i=$((i+1))
@@ -34,9 +37,17 @@ while [ "$(q "SELECT count(*) FROM telephony_event_journal WHERE occurred_at < N
   out=$(q "WITH d AS (SELECT id FROM telephony_event_journal WHERE occurred_at < NOW() - INTERVAL '$JDAYS days' ORDER BY id LIMIT $BATCH) DELETE FROM telephony_event_journal WHERE id IN (SELECT id FROM d);" | tr '\n' '|')
   echo "journal batch $i: $out"; case "$out" in *"DELETE 0"*) break;; esac
 done
+i=0
+while [ "$(q "SELECT count(*) FROM log_entries WHERE timestamp <= NOW() - INTERVAL '$LDAYS days';" | tail -1)" -gt 0 ] && [ "$i" -lt 40 ]; do
+  i=$((i+1))
+  out=$(q "WITH d AS (SELECT id FROM log_entries WHERE timestamp <= NOW() - INTERVAL '$LDAYS days' ORDER BY id LIMIT $BATCH) DELETE FROM log_entries WHERE id IN (SELECT id FROM d);" | tr '\n' '|')
+  echo "log batch $i: $out"; case "$out" in *"DELETE 0"*) break;; esac
+done
 q "VACUUM (ANALYZE) telephony_event_outbox;" >/dev/null 2>&1
 q "VACUUM (ANALYZE) telephony_event_journal;" >/dev/null 2>&1
+q "VACUUM (ANALYZE) log_entries;" >/dev/null 2>&1
 jleft=$(q "SELECT count(*) FROM telephony_event_journal WHERE occurred_at < NOW() - INTERVAL '$JDAYS days';" | tail -1)
 oleft=$(q "SELECT count(*) FROM telephony_event_outbox WHERE state='pending' AND created_at < NOW() - INTERVAL '$ODAYS days';" | tail -1)
-echo "retention: leftover journal=$jleft outbox=$oleft"
-[ "${jleft:-1}" -eq 0 ] && [ "${oleft:-1}" -eq 0 ] && exit 0 || exit 1
+lleft=$(q "SELECT count(*) FROM log_entries WHERE timestamp <= NOW() - INTERVAL '$LDAYS days';" | tail -1)
+echo "retention: leftover journal=$jleft outbox=$oleft log=$lleft"
+[ "${jleft:-1}" -eq 0 ] && [ "${oleft:-1}" -eq 0 ] && [ "${lleft:-1}" -eq 0 ] && exit 0 || exit 1
