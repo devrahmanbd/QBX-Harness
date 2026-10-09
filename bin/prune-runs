@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# bin/prune-runs — 30-day raw retention with fold-into-aggregates-first.
+# DRY-RUN BY DEFAULT (same mechanism as bin/pg-retention); --apply deletes.
+# Policy (Task 4, specs/harness/lifecycle): raw runs/ artifacts are retained
+# 30 days; beyond that, per-check pass-rate/duration aggregates are kept in
+# aggregates.jsonl (append-only JSONL next to runs/, jq-readable like
+# results.jsonl). A run dir is deleted ONLY AFTER its verdicts are folded.
+# Weekly cadence via systemd timer (ships DISABLED; owner enables).
+# Tolerated-red canonical strings (keep in sync with docs/governed-runs.md
+# and bin/watchdog.sh TOLERATED): each folded line for a tolerated verdict
+# carries tolerated=1 plus the note, so aggregates qualify what they absorb.
+#   L1_TOL='Cannot find profile qbx.qubickle.com' (accepted cost, no expiry)
+#   MEM-GATE exit 1 (mem0 quota freeze, expires 2026-11-01)
+# Usage: prune-runs [--apply] [--days N] [--runs-dir DIR] [--aggregates FILE]
+# Exit 0 ok/changed / 1 error / 2 nothing to do or dry-run (still ok).
+set -uo pipefail
+H="${HARNESS_ROOT:-/root/qbx-harness}"
+APPLY=0; DAYS=30; RUNS="$H/runs"; AGG="$H/aggregates.jsonl"
+while [ $# -gt 0 ]; do case "$1" in
+  --apply) APPLY=1; shift;;
+  --days) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; DAYS="$2"; shift 2;;
+  --runs-dir) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; RUNS="$2"; shift 2;;
+  --aggregates) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; AGG="$2"; shift 2;;
+  -h|--help) echo "usage: prune-runs [--apply] [--days N] [--runs-dir DIR] [--aggregates FILE]"; exit 0;;
+  *) echo "unknown arg $1" >&2; exit 64;;
+esac; done
+case "$DAYS" in ''|*[!0-9]*) echo "days must be a number" >&2; exit 64;; esac
+[ -d "$RUNS" ] || { echo "prune-runs: no runs dir: $RUNS" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "prune-runs: jq missing" >&2; exit 1; }
+
+L1_TOL='Cannot find profile qbx.qubickle.com'
+MEMGATE_EXPIRY=1793491200   # 2026-11-01T00:00:00Z
+NOW=$(date +%s); FOLDED_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+class_of() { case "$1" in 0) printf 'pass';; 1) printf 'scored';; *) printf 'infra';; esac; }
+
+# fold_one <run-dir> — append aggregate lines for every observation
+# (retries.jsonl attempts first, then results.jsonl finals — same order and
+# classing as bin/flake-rates), tagging tolerated verdicts. Idempotent:
+# runs already recorded are skipped (grep on run_id).
+fold_one() { # $1=run dir, $2=run id
+  local rd="$1" rid="$2" n=0 f line c e du cl src tol note
+  if [ -f "$AGG" ] && grep -q "\"run_id\":\"$rid\"" "$AGG" 2>/dev/null; then
+    echo "fold: $rid already aggregated, skipping append"; return 0
+  fi
+  for src in retry final; do
+    f="$rd/retries.jsonl"; [ "$src" = final ] && f="$rd/results.jsonl"
+    [ -f "$f" ] || continue
+    while IFS= read -r line || [ -n "$line" ]; do
+      c=$(printf '%s' "$line" | jq -r '.check // empty' 2>/dev/null) || continue
+      [ -n "$c" ] || continue
+      e=$(printf '%s' "$line" | jq -r '.exit // 3' 2>/dev/null); e="${e:-3}"
+      du=$(printf '%s' "$line" | jq -r '.duration_s // .dur // empty' 2>/dev/null | tr -d ' ')
+      cl=$(class_of "$e"); tol=0; note=""
+      ev=$(printf '%s' "$line" | jq -r '.evidence // ""' 2>/dev/null)
+      case "$ev" in *"$L1_TOL"*) tol=1; note="tolerated-red L1 accepted cost (docs/governed-runs.md): $L1_TOL";; esac
+      if [ "$c" = "MEM-GATE" ] && [ "$e" -eq 1 ] && [ "$NOW" -lt "$MEMGATE_EXPIRY" ]; then
+        tol=1; note="tolerated-red MEM-GATE mem0 quota freeze, expires 2026-11-01"
+      fi
+      jq -cn --arg ts "$FOLDED_TS" --arg run "$rid" --arg c "$c" \
+        --argjson exit "$e" --arg cl "$cl" --arg src "$src" \
+        --argjson tol "$tol" --arg note "$note" --arg dur "$du" \
+        '{ts:$ts,run_id:$run,check:$c,exit:$exit,class:$cl,source:$src,
+          duration_s:(if $dur=="" then null elif ($dur|tonumber? // empty)==null then $dur else ($dur|tonumber) end),
+          tolerated:$tol,tolerated_note:$note}' >> "$AGG"
+      n=$((n+1))
+    done < "$f"
+  done
+  echo "fold: $rid folded $n observations into $AGG"
+}
+
+mapfile -t CANDS < <(find "$RUNS" -maxdepth 1 -mindepth 1 -type d -mtime +"$DAYS" -printf '%f\n' 2>/dev/null | sort)
+echo "prune-runs: runs_dir=$RUNS days=$DAYS candidates=${#CANDS[@]} apply=$APPLY aggregates=$AGG"
+[ "${#CANDS[@]}" -eq 0 ] && exit 2
+[ "$APPLY" -eq 0 ] && { printf 'dry-run would fold+delete: %s\n' "${CANDS[@]}"; exit 2; }
+
+[ -f "$AGG" ] || : > "$AGG"
+fail=0
+for id in "${CANDS[@]}"; do
+  fold_one "$RUNS/$id" "$id" || { echo "fold FAILED for $id, NOT deleting" >&2; fail=1; continue; }
+  rm -rf "$RUNS/$id" || { echo "delete FAILED for $id" >&2; fail=1; continue; }
+  echo "prune: deleted $id (verdicts folded first)"
+done
+[ "$fail" -eq 0 ]

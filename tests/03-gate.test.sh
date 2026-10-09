@@ -1,7 +1,7 @@
 # tests/03-gate.test.sh
 #!/usr/bin/env bash
 set -uo pipefail
-H=/root/qbx-harness
+H="${HARNESS_ROOT:-/root/qbx-harness}"
 export MEM0_AGENT_ID="qbx-harness-gatetest-$$"
 "$H/bin/ingest-memory" --sources "$H/tests/fixtures/ingest-sample.md" >/dev/null \
   || { echo "ingest failed"; exit 1; }

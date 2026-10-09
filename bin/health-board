@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# bin/health-board — trend board over aggregates + live runs (flake-rates pattern).
+# Reads aggregates.jsonl (folded history, tolerated flags stored) plus live
+# runs/ dirs (results.jsonl finals + retries.jsonl attempts, tolerated
+# recomputed from evidence), then flags per-check drift.
+# DRIFT BAND (Task 4 implementer discretion, recorded here):
+#   window = trailing 20 observations per check (minimum 5 to judge);
+#   PASS band: window pass_rate >= 0.80, else DRIFT(low-pass);
+#   DURATION band: window avg duration > 2.0x lifetime avg duration
+#     (minimum 5 lifetime duration samples), else ok, else SLOW;
+#   tolerated-red verdicts (L1 string, MEM-GATE pre-2026-11-01) render
+#   TOLERATED with their note and NEVER DRIFT — but only when EVERY
+#   trailing-window failure is tolerated (windowed wtol==wf); pre-expiry
+#   tolerated rows never shield post-expiry untolerated failures.
+# BOARD FORMAT (implementer discretion): markdown table written to
+# state/health-board.md and stdout: check | verdict | obs | pass_rate |
+# band_floor | avg_dur_s | dur_baseline_s | note. Footer records band values.
+# Usage: health-board [--runs-dir DIR] [--aggregates FILE] [--out FILE]
+# Exit 0 clean (no drift) / 1 drift flagged / 2 no data / 64 usage.
+set -uo pipefail
+H="${HARNESS_ROOT:-/root/qbx-harness}"
+RUNS="$H/runs"; AGG="$H/aggregates.jsonl"; OUT="$H/state/health-board.md"
+while [ $# -gt 0 ]; do case "$1" in
+  --runs-dir) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; RUNS="$2"; shift 2;;
+  --aggregates) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; AGG="$2"; shift 2;;
+  --out) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; OUT="$2"; shift 2;;
+  -h|--help) echo "usage: health-board [--runs-dir DIR] [--aggregates FILE] [--out FILE]"; exit 0;;
+  *) echo "unknown arg $1" >&2; exit 64;;
+esac; done
+command -v jq >/dev/null 2>&1 || { echo "health-board: jq missing" >&2; exit 1; }
+
+WIN=20; FLOOR=0.80; DUR_MULT=2.0; MIN_OBS=5; MIN_DUR=5
+L1_TOL='Cannot find profile qbx.qubickle.com'
+MEMGATE_EXPIRY=1793491200
+NOW=$(date +%s)
+
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+
+# observation stream per check: "<class> <dur> <tol>" lines, oldest first.
+# aggregates.jsonl first (history), then live runs/ dirs chronological.
+if [ -f "$AGG" ]; then while IFS= read -r l || [ -n "$l" ]; do
+  c=$(printf '%s' "$l" | jq -r '.check // empty' 2>/dev/null) || continue
+  [ -n "$c" ] || continue
+  e=$(printf '%s' "$l" | jq -r '.exit // 3' 2>/dev/null); e="${e:-3}"
+  du=$(printf '%s' "$l" | jq -r '.duration_s // "-" ' 2>/dev/null | tr -d ' '); [ -n "$du" ] || du="-"
+  [ "$du" = "null" ] && du="-"
+  t=$(printf '%s' "$l" | jq -r '.tolerated // 0' 2>/dev/null); t="${t:-0}"
+  case "$e" in 0) cl=P;; 1) cl=S;; *) cl=I;; esac
+  printf '%s %s %s\n' "$cl" "$du" "$t" >> "$TMP/obs.$c"
+  n=$(printf '%s' "$l" | jq -r '.tolerated_note // ""' 2>/dev/null)
+  [ -n "$n" ] && [ ! -f "$TMP/note.$c" ] && printf '%s' "$n" > "$TMP/note.$c"
+done < "$AGG"; fi
+if [ -d "$RUNS" ]; then for d in $(ls "$RUNS" 2>/dev/null | sort); do
+  rd="$RUNS/$d"
+  for f in "$rd/retries.jsonl" "$rd/results.jsonl"; do
+    [ -f "$f" ] || continue
+    while IFS= read -r l || [ -n "$l" ]; do
+      c=$(printf '%s' "$l" | jq -r '.check // empty' 2>/dev/null) || continue
+      [ -n "$c" ] || continue
+      e=$(printf '%s' "$l" | jq -r '.exit // 3' 2>/dev/null); e="${e:-3}"
+      du=$(printf '%s' "$l" | jq -r '.duration_s // .dur // "-"' 2>/dev/null | tr -d ' '); [ -n "$du" ] || du="-"
+      ev=$(printf '%s' "$l" | jq -r '.evidence // ""' 2>/dev/null)
+      t=0; n=""
+      case "$ev" in *"$L1_TOL"*) t=1; n="tolerated-red L1 accepted cost (docs/governed-runs.md)";; esac
+      if [ "$c" = "MEM-GATE" ] && [ "$e" -eq 1 ] && [ "$NOW" -lt "$MEMGATE_EXPIRY" ]; then
+        t=1; n="tolerated-red MEM-GATE mem0 quota freeze, expires 2026-11-01"
+      fi
+      case "$e" in 0) cl=P;; 1) cl=S;; *) cl=I;; esac
+      printf '%s %s %s\n' "$cl" "$du" "$t" >> "$TMP/obs.$c"
+      [ -n "$n" ] && [ ! -f "$TMP/note.$c" ] && printf '%s' "$n" > "$TMP/note.$c"
+    done < "$f"
+  done
+done; fi
+
+ls "$TMP"/obs.* >/dev/null 2>&1 || { echo "health-board: no observations" >&2; exit 2; }
+
+drift=0
+{
+echo "# Harness health board ($(date -u +%Y-%m-%dT%H:%M:%SZ))"
+echo
+echo "| check | verdict | obs | pass_rate | band_floor | avg_dur_s | dur_baseline_s | note |"
+echo "|---|---|---|---|---|---|---|---|"
+for f in "$TMP"/obs.*; do
+  [ -f "$f" ] || continue
+  c="${f##*/obs.}"
+  # shellcheck disable=SC2016
+  stats=$(awk -v win="$WIN" -v floor="$FLOOR" -v dm="$DUR_MULT" -v mo="$MIN_OBS" -v md="$MIN_DUR" '
+    {n++; if($1=="P")p++;
+     if($2!="-"&&$2+0==$2){lds+=$2;lnd++}
+     lines[n]=$0}
+    END{
+      if(n<mo){printf "%d 0 na na na na THIN", n; exit}
+      s=(n>win)?n-win+1:1; wp=0; wn=0; wds=0; wnd=0; wtol=0
+      for(i=s;i<=n;i++){split(lines[i],a," "); wn++; if(a[1]=="P")wp++;
+        if(a[1]!="P"&&a[3]==1)wtol++;
+        if(a[2]!="-"&&a[2]+0==a[2]){wds+=a[2];wnd++}}
+      pr=wp/wn; wavg=(wnd>0)?wds/wnd:0; lavg=(lnd>0)?lds/lnd:0
+      wf=wn-wp; v="OK"; note=""
+      if(wf>0 && pr<floor && wtol==wf){v="TOLERATED"}
+      else if(pr<floor){v="DRIFT(low-pass)"}
+      else if(lnd>=md && wnd>0 && lavg>0 && wavg>dm*lavg){v="SLOW"}
+      printf "%d %d %.2f %.2f %s %s %s", n, wtol, pr, floor, \
+        ((wnd>0)?sprintf("%.1f",wavg):"na"), ((lnd>0)?sprintf("%.1f",lavg):"na"), v
+    }' "$f")
+  set -- $stats
+  obs="$1" tol="$2" pr="$3" fl="$4" wavg="$5" lavg="$6" verdict="$7"
+  note=""; [ -f "$TMP/note.$c" ] && note=$(cat "$TMP/note.$c")
+  [ "$obs" -lt "$MIN_OBS" ] && verdict="THIN-DATA"
+  case "$verdict" in DRIFT*|SLOW) drift=1;; esac
+  [ "$tol" -gt 0 ] && [ -z "$note" ] && note="tolerated-red verdicts present"
+  printf '| %s | %s | %s | %s | %s | %s | %s | %s |\n' \
+    "$c" "$verdict" "$obs" "$pr" "$fl" "$wavg" "$lavg" "$note"
+done
+echo
+echo "_Band: trailing-$WIN obs (min $MIN_OBS), pass_rate floor $FLOOR, duration flag above ${DUR_MULT}x lifetime avg (min $MIN_DUR samples). TOLERATED never pages; see docs/governed-runs.md._"
+} > "$OUT"
+cat "$OUT"
+[ "$drift" -eq 0 ]

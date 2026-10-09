@@ -1,7 +1,7 @@
 # tests/12-dtmf.test.sh — Task 2 probe: sip_caller RFC2833 DTMF send (offer te/101, fail-closed verify, digit round-trip)
 #!/usr/bin/env bash
 set -uo pipefail
-H=/root/qbx-harness
+H="${HARNESS_ROOT:-/root/qbx-harness}"
 TD=$(mktemp -d)
 trap 'rm -rf "$TD"' EXIT
 

@@ -26,5 +26,5 @@ emit() {  # emit <check-id> <exit> <evidence...>  — the ONLY stdout of a check
          '{check:$check,exit:$exit,evidence:($e|.[0:3500]),ts:$ts}'
   exit "$code"; }
 require() { command -v "$1" >/dev/null 2>&1 || emit "$2" 3 "required tool missing: $1"; }
-esl() { "${HOST_NS[@]}" python3 /root/esl_api.py "$1"; }
+esl() { "${HOST_NS[@]}" python3 "${ESL_API:-/root/esl_api.py}" "$1"; }
 run_to() { local s="$1"; shift; timeout "$s" "$@"; }   # 124 → caller emits 3

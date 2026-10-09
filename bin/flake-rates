@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# bin/flake-rates — per-check pass/flake/duration rates over runs/ dirs.
+# Reads <runs>/<ts>/results.jsonl (final verdicts) + <runs>/<ts>/retries.jsonl
+# (logged infra-retry attempts). Retry attempts count INTO the observation
+# set, so budgeted retries make flakes MORE visible, not less.
+# Usage: bin/flake-rates [--runs-dir DIR] [--format tsv|json]
+set -uo pipefail
+H="${HARNESS_ROOT:-/root/qbx-harness}"
+RUNS="$H/runs"; FMT="tsv"
+while [ $# -gt 0 ]; do case "$1" in
+  --runs-dir) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; RUNS="$2"; shift 2;;
+  --format) [ $# -ge 2 ] || { echo "missing value for $1" >&2; exit 64; }; FMT="$2"; shift 2;;
+  *) echo "unknown arg $1" >&2; exit 64;;
+esac; done
+case "$FMT" in tsv|json) :;; *) echo "format must be tsv|json" >&2; exit 64;; esac
+[ -d "$RUNS" ] || { echo "flake-rates: no runs dir: $RUNS" >&2; exit 1; }
+
+TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
+# per-check observation stream: "<class> <dur>" lines, chronological.
+# class: P (exit 0) | S (exit 1 scored) | I (exit 2/3 infra). dur: seconds or "-".
+for d in $(ls "$RUNS" 2>/dev/null | sort); do
+  rd="$RUNS/$d"
+  [ -f "$rd/retries.jsonl" ] && while IFS= read -r l; do
+    c=$(printf '%s' "$l" | jq -r '.check // empty' 2>/dev/null) || continue
+    [ -n "$c" ] || continue
+    e=$(printf '%s' "$l" | jq -r '.exit // 3' 2>/dev/null); e="${e:-3}"
+    du=$(printf '%s' "$l" | jq -r '.duration_s // .dur // "-"' 2>/dev/null | tr -d ' '); [ -n "$du" ] || du="-"
+    case "$e" in 0) cl=P;; 1) cl=S;; *) cl=I;; esac
+    printf '%s %s\n' "$cl" "$du" >> "$TMP/obs.$c"
+  done < "$rd/retries.jsonl"
+  [ -f "$rd/results.jsonl" ] && while IFS= read -r l; do
+    c=$(printf '%s' "$l" | jq -r '.check // empty' 2>/dev/null) || continue
+    [ -n "$c" ] || continue
+    e=$(printf '%s' "$l" | jq -r '.exit // 3' 2>/dev/null); e="${e:-3}"
+    du=$(printf '%s' "$l" | jq -r '.duration_s // .dur // "-"' 2>/dev/null | tr -d ' '); [ -n "$du" ] || du="-"
+    case "$e" in 0) cl=P;; 1) cl=S;; *) cl=I;; esac
+    printf '%s %s\n' "$cl" "$du" >> "$TMP/obs.$c"
+    printf 'x\n' >> "$TMP/runs.$c"
+  done < "$rd/results.jsonl"
+done
+
+row_tsv() { # $1=check
+  awk 'BEGIN{p=0;s=0;i=0;tr=0;n=0;ds=0;nd=0;prev=""}
+    {n++; if($1=="P")p++; else if($1=="S")s++; else i++;
+     if(prev!=""&&$1!=prev)tr++;
+     # flake = pass<->fail oscillation: any class change counts
+     prev=$1; if($2!="-"&&$2+0==$2){ds+=$2;nd++}}
+    END{fr=(n>1)?tr/(n-1):0; pr=(n>0)?p/n:0;
+     printf "%d %d %d %d %d %.2f %.2f %s", n,p,s,i,tr,fr,pr,(nd>0?ds/nd:"na")}' "$1"
+}
+
+if [ "$FMT" = tsv ]; then
+  printf 'check\truns\tobs\tpass\tscored\tinfra\tretries\ttransitions\tflake_rate\tpass_rate\tavg_dur_s\n'
+fi
+json_first=1; [ "$FMT" = json ] && printf '[\n'
+for f in "$TMP"/obs.*; do
+  [ -f "$f" ] || continue
+  c="${f##*/obs.}"
+  runs=$(wc -l < "$TMP/runs.$c" 2>/dev/null || echo 0)
+  # retries for this check = observations minus final verdicts
+  stats=$(row_tsv "$f"); set -- $stats
+  obs="$1" pass="$2" scored="$3" infra="$4" trans="$5" fr="$6" pr="$7" dur="$8"
+  retr=$((obs - runs)); [ "$retr" -lt 0 ] && retr=0
+  if [ "$FMT" = tsv ]; then
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      "$c" "$runs" "$obs" "$pass" "$scored" "$infra" "$retr" "$trans" "$fr" "$pr" "$dur"
+  else
+    [ "$json_first" -eq 1 ] || printf ',\n'; json_first=0
+    jq -cn --arg c "$c" --argjson runs "$runs" --argjson obs "$obs" \
+      --argjson pass "$pass" --argjson scored "$scored" --argjson infra "$infra" \
+      --argjson retries "$retr" --argjson trans "$trans" --argjson fr "$fr" \
+      --argjson pr "$pr" --arg dur "$dur" \
+      '{check:$c,runs:$runs,obs:$obs,pass:$pass,scored:$scored,infra:$infra,retries:$retries,transitions:$trans,flake_rate:$fr,pass_rate:$pr,avg_dur_s:$dur}'
+  fi
+done
+if [ "$FMT" = json ]; then printf '\n]\n'; fi
+exit 0

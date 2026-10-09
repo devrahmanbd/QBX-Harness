@@ -1,7 +1,7 @@
 # tests/10-voicemail.test.sh — Task 3 M3: mailbox-4000 deposit -> API list -> delete -> zero residue
 #!/usr/bin/env bash
 set -uo pipefail
-H=/root/qbx-harness
+H="${HARNESS_ROOT:-/root/qbx-harness}"
 TD=$(mktemp -d); RUN_DIR=$(mktemp -d)
 trap 'rm -rf "$TD" "$RUN_DIR"' EXIT   # covers scratch + RUN_DIR on every path (R-tmp), not just success
 M3="$H/checks/M3-voicemail.sh"

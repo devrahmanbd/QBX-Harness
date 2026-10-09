@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-H=/root/qbx-harness
+H="${HARNESS_ROOT:-/root/qbx-harness}"
 AG="qbx-harness-test-$$"
 export MEM0_AGENT_ID=$AG
 trap 'for i in $("$H/bin/mem0" list | jq -r ".[].id // empty"); do "$H/bin/mem0" delete "$i" >/dev/null; done' EXIT

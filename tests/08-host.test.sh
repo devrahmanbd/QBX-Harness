@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-H=/root/qbx-harness; F="$H/tests/fixtures"
+H="${HARNESS_ROOT:-/root/qbx-harness}"; F="$H/tests/fixtures"
 st=$(mktemp -d); TD=$(mktemp -d)
 trap 'rm -rf "$st" "$TD"' EXIT
 # L1 red fixture

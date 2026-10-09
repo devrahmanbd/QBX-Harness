@@ -65,6 +65,12 @@ for id in $ids; do
       ctx="$RUN_DIR/memory/$id.json"   # discarded search body, kept auditable per run (empty on failure)
       "$H/bin/mem0" search "$mq" > "$ctx" 2>/dev/null || { MEMDEG=1; flag "memory_degraded=1"; }
     fi
+    # infra-only retry budget: exit 2/3 with infra-class evidence may retry on a
+    # fixed logged budget (QBX_RETRY_BUDGET, default 2); scored exit 1 NEVER retries.
+    att=0; RB="${QBX_RETRY_BUDGET:-2}"; RD="${QBX_RETRY_DELAY_S:-1}"
+    case "$RB" in ''|*[!0-9]*) RB=2;; esac
+    case "$RD" in ''|*[!0-9]*) RD=1;; esac
+    while :; do
     out=$(RUN_DIR="$RUN_DIR" MEM0_CONTEXT_FILE="$ctx" timeout "$to" bash "$file" 2>"$H/state/.err.$$"); rc=$?
     errtail=$(tail -c 300 "$H/state/.err.$$" 2>/dev/null | tr '\n' ' '); rm -f "$H/state/.err.$$"
     line=$(printf '%s' "$out" | grep -m1 '^{.*}$')
@@ -75,11 +81,33 @@ for id in $ids; do
         --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{check:$c,exit:$e,evidence:$ev,ts:$ts}')
       # rc stays raw on purpose: the 124 arm below must still see a timeout (item 9 pin)
     fi
+    real=$(printf '%s' "$line" | jq -r '.exit // 3' 2>/dev/null); real="${real:-3}"
+    case "$real" in 0|1|2|3) :;; *) line=$(printf '%s' "$line" | jq -c --argjson e 3 --arg ev "normalized_from=$real" '.exit=$e, .evidence=((.evidence // "")+" "+$ev)'); real=3;; esac
+    [ "$rc" -eq 124 ] && { line=$(printf '%s' "$line" | jq -c '.exit=3 | .evidence=((.evidence // "")+" timeout")'); real=3; }
+    # retry gate: scored (exit 1) never; budget exhausted never; else infra-class evidence only
+    if [ "$real" -eq 1 ] || [ "$att" -ge "$RB" ]; then break; fi
+    evlc=$(printf '%s' "$line" | jq -r '.evidence // ""' 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    retryable=0
+    [ "$rc" -eq 124 ] && retryable=1
+    if [ "$retryable" -eq 0 ]; then
+      case "$evlc" in
+        *timeout*|*"timed out"*|*unreachable*|*refused*|*reset*by*peer*|*no*route*to*host*|*temporar*|*transient*|*stale*|*sibling*|*residue*|*no*channel*|*uuid-poll*|*unreadable*|*login*failed*|*fetch*failed*|*inspect*failed*|*could*not*connect*|*failed*to*connect*|*endpoint*|*econn*|*etimedout*|*socket*|*dial*|*busy*|*locked*|*empty*|*precondition*) retryable=1;;
+      esac
+    fi
+    [ "$retryable" -eq 0 ] && break
+    att=$((att+1))
+    rline=$(printf '%s' "$line" | jq -c --argjson a "$att" --arg run "$RUN_ID" '. + {run_id:$run, attempt:$a, final:0}')
+    printf '%s\n' "$rline" >> "$RUN_DIR/retries.jsonl"
+    { printf 'retry %s attempt %d/%s exit=%s ev=' "$id" "$att" "$RB" "$real";
+      printf '%s' "$line" | jq -r '.evidence // ""' | cut -c1-200 | redact; printf '\n'; } >> "$RUN_DIR/retries.log"
+    flag "retried=$id"
+    [ "$RD" -gt 0 ] 2>/dev/null && sleep "$RD"
+    done
   fi
   # hoisted after the if/else: synthesized missing-file lines flow through the SAME counter as real results
   real=$(printf '%s' "$line" | jq -r '.exit // 3' 2>/dev/null); real="${real:-3}"
   case "$real" in 0|1|2|3) :;; *) line=$(printf '%s' "$line" | jq -c --argjson e 3 --arg ev "normalized_from=$real" '.exit=$e, .evidence=((.evidence // "")+" "+$ev)'); real=3;; esac
-  [ "$rc" -eq 124 ] && { line=$(printf '%s' "$line" | jq -c '.exit=3 | .evidence=((.evidence // "")+" timeout")'); real=3; }
+  [ "$rc" -eq 124 ] && case "$line" in *timeout*) :;; *) line=$(printf '%s' "$line" | jq -c '.exit=3 | .evidence=((.evidence // "")+" timeout")'); real=3;; esac
   # consecutive counter: error(3) increments and trips at exactly 3; exit 0/1/2 reset to 0
   if [ "$real" -eq 3 ]; then CONSEC=$((CONSEC+1)); else CONSEC=0; fi
   if [ "$CONSEC" -ge 3 ]; then STOP="breaker: 3 consecutive error(3)"; fi

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-H=/root/qbx-harness
+H="${HARNESS_ROOT:-/root/qbx-harness}"
 TD=$(mktemp -d)
 trap 'rm -rf "$TD"' EXIT
 # closed-port negatives: silence must never pass

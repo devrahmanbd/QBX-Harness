@@ -1,10 +1,10 @@
 # tests/09-loop.test.sh
 #!/usr/bin/env bash
 set -uo pipefail
-H=/root/qbx-harness
+H="${HARNESS_ROOT:-/root/qbx-harness}"
 L="$H/bin/loop"; R="$H/bin/report"
 mkdir -p "$H/tests/fixtures/loop"
-gen() { printf '#!/usr/bin/env bash\nHARNESS_ROOT=%s; . "$HARNESS_ROOT/lib/common.sh"\n%s\n' "$H" "$2" > "$1"; chmod +x "$1"; }
+gen() { printf '#!/usr/bin/env bash\nHARNESS_ROOT="${HARNESS_ROOT:-%s}"; . "$HARNESS_ROOT/lib/common.sh"\n%s\n' "$H" "$2" > "$1"; chmod +x "$1"; }
 F="$H/tests/fixtures/loop"
 gen "$F/zz-pass-a.sh" 'emit ZZPASS 0 "stub a evidence"'
 gen "$F/zz-pass-b.sh" 'emit ZZPASS 0 "stub b evidence"'

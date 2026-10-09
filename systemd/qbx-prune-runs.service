@@ -1,0 +1,11 @@
+[Unit]
+Description=QBX harness 30-day raw retention (fold-into-aggregates-first)
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/root/qbx-harness
+ExecStart=/root/qbx-harness/bin/prune-runs --apply
+StandardOutput=journal
+StandardError=journal

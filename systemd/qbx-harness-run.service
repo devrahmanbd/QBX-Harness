@@ -11,5 +11,7 @@ WorkingDirectory=/root/qbx-harness
 # Full loop (memory paths degrade gracefully while mem0 quota is dead).
 # E1 restart probe is OFF here (needs explicit E1_RESTART_PROBE=1) — base checks only.
 ExecStart=/root/qbx-harness/bin/loop
+# Verdict export for Alertmanager path (Task 1.1): never fails the unit.
+ExecStartPost=-/root/qbx-harness/bin/watchdog.sh
 StandardOutput=journal
 StandardError=journal

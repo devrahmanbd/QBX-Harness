@@ -1,7 +1,7 @@
 # tests/04-common.test.sh
 #!/usr/bin/env bash
 set -uo pipefail
-export H=/root/qbx-harness
+export H="${HARNESS_ROOT:-/root/qbx-harness}"
 t4=$(mktemp -d); trap 'rm -rf "$t4" /tmp/h2-*.json /tmp/h3.json' EXIT
 # 1) emit produces parseable JSON and redacts planted secrets
 line=$(bash -c 'HARNESS_ROOT='"$H"'; . "$H/lib/common.sh"; emit T0 1 "pw=FREESWITCH_ESL_PASSWORD=hunter2 Authorization: Bearer abc123token"' 2>&1); rc=$?

@@ -1,0 +1,11 @@
+[Unit]
+Description=Weekly QBX harness retention
+
+[Timer]
+# Proposed cadence (owner decision required before enabling):
+OnCalendar=Sun *-*-* 02:30:00 UTC
+Persistent=true
+RandomizedDelaySec=900
+
+[Install]
+WantedBy=timers.target

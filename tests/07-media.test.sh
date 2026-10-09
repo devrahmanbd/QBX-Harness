@@ -1,7 +1,7 @@
 # tests/07-media.test.sh
 #!/usr/bin/env bash
 set -uo pipefail
-H=/root/qbx-harness
+H="${HARNESS_ROOT:-/root/qbx-harness}"
 TD=$(mktemp -d)
 RUN_DIR=$(mktemp -d)
 trap 'rm -rf "$TD" "$RUN_DIR"' EXIT   # covers json scratch + RUN_DIR on every path (R-tmp), not just success

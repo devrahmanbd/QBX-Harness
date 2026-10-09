@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bin/ingest-memory — chunked ingestion. exit 0 all stored / 1 missing source.
 set -uo pipefail
-H=/root/qbx-harness; M="$H/bin/mem0"
+H="${HARNESS_ROOT:-/root/qbx-harness}"; M="$H/bin/mem0"
 srcs=()
 if [ "${1:-}" = "--sources" ]; then shift; srcs=("$@")
 else

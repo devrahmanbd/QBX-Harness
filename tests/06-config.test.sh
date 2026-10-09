@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-H=/root/qbx-harness; F="$H/tests/fixtures/config"
+H="${HARNESS_ROOT:-/root/qbx-harness}"; F="$H/tests/fixtures/config"
 TD=$(mktemp -d)
 trap 'rm -rf "$TD"' EXIT
 bash "$H/checks/C1-config-integrity.sh" >/dev/null 2>&1 && c1_live=0 || c1_live=$?

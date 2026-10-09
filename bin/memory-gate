@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bin/memory-gate — 3 probe queries, retries for eventual consistency. exit 0/1, one JSON line.
 set -uo pipefail
-H=/root/qbx-harness; M="$H/bin/mem0"
+H="${HARNESS_ROOT:-/root/qbx-harness}"; M="$H/bin/mem0"
 Q1="${GATE_Q1:-which SIP port does the external profile listen on}"
 Q2="${GATE_Q2:-how does the XML-curl resolver fail closed for unknown DIDs}"
 Q3="${GATE_Q3:-where is FreeSWITCH configuration stored in this deployment}"
