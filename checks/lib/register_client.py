@@ -7,7 +7,10 @@ import hashlib, random, re, socket, sys, time
 def md5(s): return hashlib.md5(s.encode()).hexdigest()
 def rand_tag(): return format(random.getrandbits(32), "08x")
 
-def digest(header, method, uri, user, pw):
+def digest(header, method, uri, user, pw, proxy=False):
+    # RFC 3261 s22 (mirrors sip_caller.py): 407 (Proxy-Authenticate) ->
+    # Proxy-Authorization; 401 (WWW-Authenticate) -> Authorization.
+    scheme = "Proxy-Authorization" if proxy else "Authorization"
     realm = re.search(r'realm="([^"]+)"', header)
     nonce = re.search(r'nonce="([^"]+)"', header)
     qop = re.search(r'qop="([^"]+)"', header)
@@ -17,12 +20,12 @@ def digest(header, method, uri, user, pw):
     if qop and "auth" in qop.group(1):
         nc, cnonce = "00000001", rand_tag()
         resp = md5("%s:%s:%s:%s:%s:%s" % (ha1, nonce, nc, cnonce, "auth", ha2))
-        return ('Authorization: Digest username="%s", realm="%s", nonce="%s", uri="%s", '
+        return ('%s: Digest username="%s", realm="%s", nonce="%s", uri="%s", '
                 'response="%s", algorithm=MD5, qop=auth, nc=%s, cnonce="%s"'
-                % (user, realm, nonce, uri, resp, nc, cnonce))
+                % (scheme, user, realm, nonce, uri, resp, nc, cnonce))
     resp = md5("%s:%s:%s" % (ha1, nonce, ha2))
-    return ('Authorization: Digest username="%s", realm="%s", nonce="%s", uri="%s", '
-            'response="%s", algorithm=MD5' % (user, realm, nonce, uri, resp))
+    return ('%s: Digest username="%s", realm="%s", nonce="%s", uri="%s", '
+            'response="%s", algorithm=MD5' % (scheme, user, realm, nonce, uri, resp))
 
 class Sip(object):
     def __init__(self, proxy, port):
@@ -62,7 +65,7 @@ def register_round(s, uri, user, domain, pw, expires, start_cseq):
     resp = s.recv_status()
     status = resp.split("\r\n")[0] if resp else "NO-RESPONSE"
     if status.startswith(("SIP/2.0 401", "SIP/2.0 407")):
-        auth = digest(resp, "REGISTER", uri, user, pw)
+        auth = digest(resp, "REGISTER", uri, user, pw, proxy=status.startswith("SIP/2.0 407"))
         s.send(build_register(s, uri, user, domain, cseq + 1,
                               "z9hG4bK-r-%s" % rand_tag(), tag, callid, expires, auth=auth))
         resp = s.recv_status()

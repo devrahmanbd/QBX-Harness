@@ -2,10 +2,14 @@
 # memory-query: voicemail mailbox 4000 deposit api list delete roundtrip
 # timeout: 120
 #!/usr/bin/env bash
+if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+  echo "usage: M3-voicemail.sh [--help] (deposits into mailbox \$M3_EXT via live DID route, then lists, verifies, deletes)"
+  exit 0
+fi
 HARNESS_ROOT="${HARNESS_ROOT:-/root/qbx-harness}"; . "$HARNESS_ROOT/lib/common.sh"
 require jq M3; require curl M3; require python3 M3
 . "$HARNESS_ROOT/lib/qbx_api.sh"
-ext="${M3_EXT:-4000}"; domain="${M3_DOMAIN:-qbx.qubickle.com}"; did="${M3_DID:-+16804888308}"
+ext="${M3_EXT:-4000}"; domain="${M3_DOMAIN:-qbx.qubickle.com}"; did="${M3_DID:-+14255230065}"
 base="${M1_BASE_URL:-http://127.0.0.1:3006}"
 wav="${M3_WAV:-/usr/share/freeswitch/sounds/en/us/callie/voicemail/vm-instruction.wav}"
 hold="${M3_HOLD:-15}"; wait_s="${M3_WAIT:-30}"

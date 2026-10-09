@@ -37,6 +37,20 @@ C_PREFIX_FIXTURE_DIR="$TD/green" bash "$C" >"$TD/green.json" 2>&1 \
   || { echo "GREEN fixture should pass: $(cat "$TD/green.json")"; exit 1; }
 jq -e '.check=="C-every-render-tenant-prefix" and .exit==0' "$TD/green.json" >/dev/null \
   || { echo "GREEN fixture not exit 0: $(cat "$TD/green.json")"; exit 1; }
+# OUT-OF-SCOPE: non-extension-targeted render (hangup-only, no prefix, no
+# extension applications) must skip with an explicit token — NOT offender,
+# NOT silent
+mkdir -p "$TD/oos"
+cp "$F/good-feature.xml" "$TD/oos/feature.xml"
+cp "$F/good-default.xml" "$TD/oos/default.xml"
+cp "$F/oos-hangup.xml" "$TD/oos/inbound.xml"
+cp "$F/noroute-outbound.xml" "$TD/oos/outbound.xml"
+C_PREFIX_FIXTURE_DIR="$TD/oos" bash "$C" >"$TD/oos.json" 2>&1 \
+  || { echo "OOS fixture should skip-pass: $(cat "$TD/oos.json")"; exit 1; }
+jq -e '.check=="C-every-render-tenant-prefix" and .exit==0' "$TD/oos.json" >/dev/null \
+  || { echo "OOS fixture not exit 0: $(cat "$TD/oos.json")"; exit 1; }
+grep -q 'inbound([^)]*)=out-of-scope-skipped' "$TD/oos.json" \
+  || { echo "OOS token missing/not family-named: $(cat "$TD/oos.json")"; exit 1; }
 # LIVE: served config must carry the prefix on every live-renderable family
 bash "$C" >"$TD/live.json" 2>&1 \
   || { echo "LIVE should pass: $(cat "$TD/live.json")"; exit 1; }

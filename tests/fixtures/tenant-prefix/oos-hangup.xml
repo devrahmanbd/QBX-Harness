@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="freeswitch/xml"><section name="dialplan"><context name="public"><extension name="inbound_x"><condition expression="^\+1000$" field="destination_number"><action application="hangup" data="NORMAL_CLEARING"/></condition></extension></context></section></document>

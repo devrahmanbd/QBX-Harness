@@ -57,7 +57,13 @@ class Sip(object):
         return "", got
 
 
-def digest(header, method, uri, user, pw, realm, nonce):
+def digest(header, method, uri, user, pw, realm, nonce, proxy=False):
+    # RFC 3261 s22: a 407 (Proxy-Authenticate) challenge MUST be answered with
+    # Proxy-Authorization; a 401 (WWW-Authenticate) with Authorization. Sofia
+    # ignores Authorization on proxy-challenged requests and re-issues 407
+    # (double-407 — proven live: strict-matched Authorization answer -> 407,
+    # Proxy-Authorization answer -> 200), so the header follows the challenge.
+    scheme = "Proxy-Authorization" if proxy else "Authorization"
     m = re.search(r'realm="([^"]+)"', header)
     if m:
         realm = m.group(1)
@@ -70,12 +76,35 @@ def digest(header, method, uri, user, pw, realm, nonce):
     if qop_m and "auth" in qop_m.group(1):
         nc, cnonce = "00000001", rand_tag()
         resp = md5("%s:%s:%s:%s:%s:%s" % (ha1, nonce, nc, cnonce, "auth", ha2))
-        return ('Authorization: Digest username="%s", realm="%s", nonce="%s", uri="%s", '
+        return ('%s: Digest username="%s", realm="%s", nonce="%s", uri="%s", '
                 'response="%s", algorithm=MD5, qop=auth, nc=%s, cnonce="%s"'
-                % (user, realm, nonce, uri, resp, nc, cnonce))
+                % (scheme, user, realm, nonce, uri, resp, nc, cnonce))
     resp = md5("%s:%s:%s" % (ha1, nonce, ha2))
-    return ('Authorization: Digest username="%s", realm="%s", nonce="%s", uri="%s", '
-            'response="%s", algorithm=MD5' % (user, realm, nonce, uri, resp))
+    return ('%s: Digest username="%s", realm="%s", nonce="%s", uri="%s", '
+            'response="%s", algorithm=MD5' % (scheme, user, realm, nonce, uri, resp))
+
+
+def recv_match(s, branch, cseq, method, timeout):
+    # Strict transaction match: accept only the response whose Via branch and
+    # CSeq match our request. FS retransmits the INVITE 407 for ~32s (Timer H);
+    # the old first-final-wins receive consumed those strays as live answers
+    # (phantom 407s on BYE, phantom invite failures). Returns (text, strays).
+    import time as _t
+    want_branch, want_cseq = branch, "%d %s" % (cseq, method)
+    deadline = _t.time() + timeout
+    strays = 0
+    while _t.time() < deadline:
+        resp, _ = s.recv_until(r"^SIP/2.0 \d\d\d", 1.0)
+        if not resp:
+            continue
+        if resp.startswith("SIP/2.0 1"):
+            continue  # provisional (100 Trying etc.): never a final answer
+        vb = re.search(r"^Via:.*branch=([^;\s]+)", resp, re.M)
+        cs = re.search(r"^CSeq:\s*(\S+.*)$", resp, re.M)
+        if vb and cs and vb.group(1) == want_branch and cs.group(1).strip() == want_cseq:
+            return resp, strays
+        strays += 1
+    return "", strays
 
 
 def stream_dtmf(rtp, addr, deadline, seq, ts, ssrc, digits, delay):
@@ -120,6 +149,32 @@ def stream_dtmf(rtp, addr, deadline, seq, ts, ssrc, digits, delay):
     if ev is not None:  # deadline hit mid-event: digit counts as not sent (fail closed)
         todo.insert(0, ev["ch"])
     return sent, "".join(todo)
+
+
+def send_bye(s, uri, via_h, from_h, to_h, callid, cseq, user, pw, realm, branch):
+    # Plain in-dialog BYE (no preemptive auth: FS answers it 200 directly and
+    # a wrong-guess preemptive can provoke a real 407). recv_match() keeps
+    # stray INVITE-407 retransmits out; a genuine 401/407 gets one authed
+    # retry with the fresh challenge.
+    bye = ("BYE %s SIP/2.0\r\n%s\r\n%s\r\n%s\r\nCall-ID: %s\r\nCSeq: %d BYE\r\n"
+           "Max-Forwards: 70\r\nContent-Length: 0\r\n\r\n"
+           % (uri, via_h, from_h, to_h, callid, cseq))
+    s.send(bye)
+    resp2, _ = recv_match(s, branch, cseq, "BYE", 5.0)
+    bye_line = resp2.split("\r\n")[0] if resp2 else "NO-RESPONSE"
+    if re.match(r"^SIP/2.0 (401|407)", bye_line) and user and pw and resp2:
+        auth = digest(resp2, "BYE", uri, user, pw, realm, "",
+                      proxy=bye_line.startswith("SIP/2.0 407"))
+        cseq += 1
+        branch = "z9hG4bK-h-%s" % rand_tag()
+        via_h = "Via: SIP/2.0/UDP %s:%d;rport;branch=%s" % (s.local_ip, s.local_port, branch)
+        bye2 = ("BYE %s SIP/2.0\r\n%s\r\n%s\r\n%s\r\nCall-ID: %s\r\nCSeq: %d BYE\r\n"
+                "%s\r\nMax-Forwards: 70\r\nContent-Length: 0\r\n\r\n"
+                % (uri, via_h, from_h, to_h, callid, cseq, auth))
+        s.send(bye2)
+        resp3, _ = recv_match(s, branch, cseq, "BYE", 5.0)
+        bye_line = resp3.split("\r\n")[0] if resp3 else "NO-RESPONSE"
+    return bye_line
 
 
 def main():
@@ -176,13 +231,13 @@ def main():
               % (uri, via_h, from_h, to_h, callid, cseq, contact, len(sdp), sdp))
 
     s.send(invite)
-    resp, seq = s.recv_until(r"^SIP/2.0 (200|401|407|4[0-9][0-9]|5[0-9][0-9])", 8.0)
+    resp, seq = recv_match(s, branch, cseq, "INVITE", 8.0)
     status = resp.split("\r\n")[0] if resp else "NO-RESPONSE"
     if not resp:
         print("invite=%s" % status)
         return 1
     if re.search(r"^SIP/2.0 (401|407)", status) and user and pw:
-        auth = digest(resp, "INVITE", uri, user, pw, realm, "")
+        auth = digest(resp, "INVITE", uri, user, pw, realm, "", proxy=status.startswith("SIP/2.0 407"))
         cseq += 1
         branch = "z9hG4bK-h-%s" % rand_tag()
         via_h = "Via: SIP/2.0/UDP %s:%d;rport;branch=%s" % (s.local_ip, s.local_port, branch)
@@ -191,12 +246,17 @@ def main():
                    "Content-Length: %d\r\n\r\n%s"
                    % (uri, via_h, from_h, to_h, callid, cseq, auth, contact, len(sdp), sdp))
         s.send(invite2)
-        resp, seq = s.recv_until(r"^SIP/2.0 (200|4[0-9][0-9]|5[0-9][0-9])", 8.0)
+        resp, seq = recv_match(s, branch, cseq, "INVITE", 8.0)
         status = resp.split("\r\n")[0] if resp else "NO-RESPONSE"
     print("invite=%s" % status.split("\r\n")[0])
     if not status.startswith("SIP/2.0 200"):
-        print("seen=%s" % " | ".join(seq[:6]))
+        print("seen_strays=%d" % seq)
         return 1
+    # RFC 3261 dialog: learn the To tag from the 200 OK; ACK/BYE below are
+    # in-dialog and must carry it (without it FS cannot match the dialog and
+    # the authed BYE retry still fails).
+    mt = re.search(r"^To:.*tag=([^\s;>]+)", resp, re.M)
+    to_h = "To: <%s>;tag=%s" % (uri, mt.group(1)) if mt else to_h
 
     m = re.search(r"c=IN IP4 (\S+)", resp)
     media_ip = m.group(1) if m else proxy
@@ -228,12 +288,7 @@ def main():
             cseq += 1
             branch = "z9hG4bK-h-%s" % rand_tag()
             via_h = "Via: SIP/2.0/UDP %s:%d;rport;branch=%s" % (s.local_ip, s.local_port, branch)
-            bye = ("BYE %s SIP/2.0\r\n%s\r\n%s\r\n%s\r\nCall-ID: %s\r\nCSeq: %d BYE\r\n"
-                   "Max-Forwards: 70\r\nContent-Length: 0\r\n\r\n"
-                   % (uri, via_h, from_h, to_h, callid, cseq))
-            s.send(bye)
-            resp2, _ = s.recv_until(r"^SIP/2.0 \d\d\d", 5.0)
-            bye_line = resp2.split("\r\n")[0] if resp2 else "NO-RESPONSE"
+            bye_line = send_bye(s, uri, via_h, from_h, to_h, callid, cseq, user, pw, realm, branch)
             print("bye=%s" % bye_line)
             rtp.close()
             s.sock.close()
@@ -267,12 +322,7 @@ def main():
     cseq += 1
     branch = "z9hG4bK-h-%s" % rand_tag()
     via_h = "Via: SIP/2.0/UDP %s:%d;rport;branch=%s" % (s.local_ip, s.local_port, branch)
-    bye = ("BYE %s SIP/2.0\r\n%s\r\n%s\r\n%s\r\nCall-ID: %s\r\nCSeq: %d BYE\r\n"
-           "Max-Forwards: 70\r\nContent-Length: 0\r\n\r\n"
-           % (uri, via_h, from_h, to_h, callid, cseq))
-    s.send(bye)
-    resp2, _ = s.recv_until(r"^SIP/2.0 \d\d\d", 5.0)
-    bye_line = resp2.split("\r\n")[0] if resp2 else "NO-RESPONSE"
+    bye_line = send_bye(s, uri, via_h, from_h, to_h, callid, cseq, user, pw, realm, branch)
     print("bye=%s" % bye_line)
     rtp.close()
     s.sock.close()
