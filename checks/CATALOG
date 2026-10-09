@@ -9,6 +9,7 @@ S4
 C1
 C2
 C3
+C-every-render-tenant-prefix
 M1
 M2
 M3
@@ -18,3 +19,14 @@ V1
 V2
 I1
 L1
+S5
+S7
+V3
+C-ctx
+C-public
+C-no-listen
+C-cid
+C-realm
+C4
+R1
+D1

@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="freeswitch/xml"><section name="dialplan"><context name="public"><extension name="inbound_x"><condition expression="^\+1000$" field="destination_number"><action application="set" data="qbx_sub_id=sub-fixture-1"></action><action application="export" data="qbx_sub_id=sub-fixture-1"></action><action application="bridge" data="x"></action></condition></extension></context></section></document>

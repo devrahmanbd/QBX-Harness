@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="freeswitch/xml"><section name="dialplan"><context name="default"><extension name="not_found"><condition><action application="hangup" data="NO_ROUTE_DESTINATION"/></condition></extension></context></section></document>

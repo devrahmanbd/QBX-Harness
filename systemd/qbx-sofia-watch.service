@@ -1,0 +1,11 @@
+[Unit]
+Description=QBX Sofia gateway + registration textfile exporter (Task 6 alerts)
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/root/qbx-harness
+ExecStart=/root/qbx-harness/bin/sofia-watch.sh
+StandardOutput=journal
+StandardError=journal

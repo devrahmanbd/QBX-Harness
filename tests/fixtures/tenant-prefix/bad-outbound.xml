@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="freeswitch/xml"><section name="dialplan"><context name="default"><extension name="outbound_x"><condition expression="^\+1000$" field="destination_number"><action application="set" data="qbx_route_kind=outbound"></action><action application="bridge" data="sofia/gateway/x/y"></action></condition></extension></context></section></document>

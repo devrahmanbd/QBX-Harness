@@ -1,0 +1,9 @@
+[Unit]
+Description=QBX Sofia exporter every 60s (feeds qbx-telephony.yml alerts)
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target

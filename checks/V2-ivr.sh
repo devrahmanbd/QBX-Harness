@@ -8,6 +8,14 @@ ext="${V2_EXT:-4000}"
 proxy="${V2_HOST:-88.99.250.99}"; port="${V2_PORT:-5080}"
 # Authorized walk (addendum): id + terminator + ONE invalid menu key (3). Menu keys 1/2/5 are
 # forbidden by design — 1/2 mark-read via VM_CHECK_PLAY_MESSAGES, 5 INSERTs voicemail_prefs rows.
+# KEY-MAP PIN (wave B, doc-only — no walk/logic change): the stock
+# mod_voicemail menu keys observed on this box are pinned as follows and the
+# walk MUST NOT widen beyond them: 4,0,0,0,# = mailbox id entry; 3 = invalid
+# key (fail_auth gate on call A, menu re-prompt on call B); 1/2 = message
+# mark-read (FORBIDDEN — would mutate mailbox state); 5 = prefs INSERT
+# (FORBIDDEN — would mutate voicemail_prefs). Any menu change (new keys,
+# reordered prompts) fails the menu-walk assertion in call B; do NOT extend
+# the walk to cover new keys without a spec amendment.
 digits="${V2_ID:-4000#3}"
 delay="${V2_DELAY:-5.0}"
 # hard scope validation (overrides must never widen the walk or the mailbox-snapshot scope): only

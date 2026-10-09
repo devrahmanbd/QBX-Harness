@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<document type="freeswitch/xml"><section name="dialplan"><context name="default"><extension name="default_2100"><condition expression="^2100$" field="destination_number"><action application="set" data="qbx_sub_id=sub-fixture-1"></action><action application="export" data="qbx_sub_id=sub-fixture-1"></action><action application="bridge" data="sofia/gateway/x/y"></action></condition></extension></context></section></document>

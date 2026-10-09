@@ -18,4 +18,9 @@ if grep -qiE 'G729|G723|ILBC' <<<"$vals"; then
 fi
 secure=$(grep -rEoh --include='*.go' --exclude='*_test.go' 'rtp_secure_media=mandatory' "$target" 2>/dev/null | wc -l)
 [ "$secure" -ge 1 ] || emit C3 1 "rtp_secure_media=mandatory absent"
-emit C3 0 "codec base [$base] present; forbidden tokens G729/G723/ILBC: 0; rtp_secure_media=mandatory hits=$secure"
+# Wave-B extension (no-transcode assertion ONLY): renders must carry
+# inherit_codec=true so bridged legs keep the negotiated codec instead of
+# transcoding. C3_ONLY scopes the same target dir for fixture tests.
+ntrans=$(grep -rEoh --include='*.go' --exclude='*_test.go' 'inherit_codec=true' "$target" 2>/dev/null | wc -l)
+[ "$ntrans" -ge 1 ] || emit C3 1 "no-transcode posture absent (inherit_codec=true hits=0)"
+emit C3 0 "codec base [$base] present; forbidden tokens G729/G723/ILBC: 0; rtp_secure_media=mandatory hits=$secure; inherit_codec=true hits=$ntrans"

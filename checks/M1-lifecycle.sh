@@ -20,6 +20,13 @@ case "$rc" in
   *) emit M1 3 "lifecycle script exit normalized_from=$rc";;
 esac
 [ -f "$art" ] || emit M1 3 "artifact missing: $art"
+# Wave-B extension (early-media answer-proof assertion ONLY): the lifecycle
+# timeline must contain a CHANNEL_ANSWER event — the leg was really answered,
+# not early-media false-answer. M1_ART_FILE injects a canned artifact for
+# fixture tests (live path still runs the script above).
+[ -n "${M1_ART_FILE:-}" ] && { [ -f "$M1_ART_FILE" ] || emit M1 3 "artifact fixture missing: $M1_ART_FILE"; art="$M1_ART_FILE"; }
+jq -e '[.events[]? | select(((.event_type // .type // .state // "") | ascii_upcase) == "CHANNEL_ANSWER")] | length >= 1' "$art" >/dev/null \
+  || emit M1 1 "answer proof absent: no CHANNEL_ANSWER in lifecycle timeline"
 jq -e '.result=="pass" and .validation.passed==true' "$art" >/dev/null || \
   emit M1 1 "artifact not pass: $(jq -c '{result,validation}' "$art" 2>/dev/null)"
 call_id=$(jq -r '.call_id // empty' "$art")

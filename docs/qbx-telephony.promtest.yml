@@ -1,0 +1,33 @@
+rule_files:
+  - /etc/prometheus/rules/qbx-telephony.yml
+evaluation_interval: 30s
+tests:
+  - interval: 30s
+    input_series:
+      - series: 'qbx_sofia_gateway_state{gateway="external::gw1",profile="external"}'
+        values: 1+0x3 0+0x10
+      - series: 'qbx_sofia_registrations{profile="internal"}'
+        values: 40+0x150 5+0x40
+      - series: 'qbx_sofia_scrape_ok'
+        values: 1+0x200
+      - series: 'qbx_harness_check_exit{check="L2",run_id="t"}'
+        values: 0+0x5 1+0x40
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: QBXTrunkGatewayDown
+        exp_alerts:
+          - exp_labels: {severity: critical, owner: telephony, runbook: sofia-rescan, gateway: "external::gw1", profile: external}
+            exp_annotations: {summary: 'trunk gateway DOWN: external::gw1 (profile external)', description: 'sofia status gateway reports non-REGED for external::gw1 over 2m. Rescan first (sofia profile external rescan external::gw1), never reload: in-progress calls survive rescan. Call-debugging flow: docs/telephony/phase102-operations-runbook.md; Task 4 sofia-rescan runbook supersedes when landed. Tolerated exclusion: none needed — zero configured gateways export no series.'}
+      - eval_time: 95m
+        alertname: QBXTelephonyRegistrationsDrop
+        exp_alerts:
+          - exp_labels: {severity: critical, owner: telephony, runbook: sofia-rescan, profile: internal}
+            exp_annotations: {summary: 'registrations halved vs 1h baseline (now 5)', description: 'Internal-profile registrations below 50% of the trailing 1h baseline for 5m. Check sofia profile internal status, mod_xml_curl directory path, then rescan per docs/telephony/phase102-operations-runbook.md. Tolerated exclusions: planned maintenance windows (silence with owner sign-off); baseline guard (>5 regs) suppresses low-count flapping on idle hosts.'}
+      - eval_time: 20m
+        alertname: QBXAuthJailInactive
+        exp_alerts:
+          - exp_labels: {severity: warning, owner: telephony, runbook: auth-jail-proof, check: L2, run_id: t}
+            exp_annotations: {summary: 'freeswitch-auth fail2ban jail not active (L2 red)', description: 'L2 reports the auth jail down or blind: enable per qbx-harness/docs/L2-auth-jail-storm-proof.md (owner step: review proof, set ignoreip, enabled=true, add L2 to checks/CATALOG). Primary page rides QBXHarnessRedSweep (critical); this warning carries the runbook. Tolerated exclusion: none — an inactive auth jail during SIP-scan season is undegraded only by explicit silence.'}
+      - eval_time: 10m
+        alertname: QBXSofiaExporterStale
+        exp_alerts: []
